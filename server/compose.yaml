@@ -1,0 +1,262 @@
+services:
+  config:
+    image: ${RUNTIME_IMAGE}
+    user: "0:0"
+    command:
+      - runtime/config.js
+      - generate
+      - /state
+    environment:
+      AMS_DATA_ROOT: /data
+      AMS_SERVICE_UID: "10001"
+    volumes:
+      - ./:/state
+      - ${DATA_DIR}:/data
+    network_mode: none
+    restart: "no"
+  core:
+    restart: unless-stopped
+    networks:
+      - stack
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ${CORE_IMAGE}
+    volumes:
+      - ./generated:/config:ro
+      - ${DATA_DIR}/core:/data
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8420/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+    depends_on:
+      config:
+        condition: service_completed_successfully
+  knowledge:
+    restart: unless-stopped
+    networks:
+      - stack
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ${KNOWLEDGE_IMAGE}
+    volumes:
+      - ./generated:/config:ro
+      - ${DATA_DIR}/knowledge:/data
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8421/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      bootstrap:
+        condition: service_completed_successfully
+  panel:
+    restart: unless-stopped
+    networks:
+      - stack
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ${PANEL_IMAGE}
+    volumes:
+      - ./generated:/config:ro
+      - ${DATA_DIR}/panel:/data
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8123/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - 127.0.0.1:8123:8123
+  memory-proxy:
+    restart: unless-stopped
+    networks:
+      - stack
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ${PROXY_IMAGE}
+    volumes:
+      - ./generated:/config:ro
+      - ${DATA_DIR}/proxy:/data
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8096/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      bootstrap:
+        condition: service_completed_successfully
+      cli-proxy-api:
+        condition: service_started
+    ports:
+      - 127.0.0.1:8096:8096
+  cli-proxy-api:
+    restart: unless-stopped
+    networks:
+      - stack
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ${CLIPROXY_IMAGE}
+    volumes:
+      - ./generated:/config:ro
+      - ${DATA_DIR}/cli-proxy-api:/data
+    depends_on:
+      config:
+        condition: service_completed_successfully
+  bootstrap:
+    image: ${RUNTIME_IMAGE}
+    user: "0:0"
+    command:
+      - --import
+      - /app/runtime/environment.js
+      - runtime/bootstrap.js
+      - check
+    environment:
+      AMS_ENV_FILE: /config/bootstrap-env.json
+    volumes:
+      - ./generated:/config:ro
+    networks:
+      - stack
+    restart: "no"
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      core:
+        condition: service_healthy
+  access:
+    restart: unless-stopped
+    networks:
+      - stack
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ${RUNTIME_IMAGE}
+    command:
+      - --import
+      - /app/runtime/environment.js
+      - runtime/access-gateway.js
+    environment:
+      AMS_ENV_FILE: /config/access-env.json
+    volumes:
+      - ./generated:/config:ro
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      knowledge:
+        condition: service_healthy
+  knowledge-service:
+    restart: unless-stopped
+    networks:
+      - stack
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ${RUNTIME_IMAGE}
+    command:
+      - runtime/knowledge-service.js
+      - /config/knowledge-service.json
+    volumes:
+      - ./generated:/config:ro
+      - ${DATA_DIR}/knowledge:/data
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8423/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      knowledge:
+        condition: service_healthy
+networks:
+  stack: {}

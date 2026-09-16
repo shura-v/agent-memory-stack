@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "sources": {
+    "tencent": {
+      "repository": "TencentCloud/TencentDB-Agent-Memory",
+      "revision": "0468a2a5b50eaafc54758ed1e2e6609472e5b6ce",
+      "url": "https://codeload.github.com/TencentCloud/TencentDB-Agent-Memory/tar.gz/0468a2a5b50eaafc54758ed1e2e6609472e5b6ce",
+      "sha256": "8ee7635a41fd25ee433ae937150790a95486dac7f58de77cc7e47a51dbc5988c"
+    },
+    "cliproxy": {
+      "repository": "router-for-me/CLIProxyAPI",
+      "revision": "7bbfeaf8a7acf2cd5a834dcb0842539fe6aabc2b",
+      "url": "https://codeload.github.com/router-for-me/CLIProxyAPI/tar.gz/7bbfeaf8a7acf2cd5a834dcb0842539fe6aabc2b",
+      "sha256": "8cdf5e29df0aa6836ba1b600d5015298968d04e35d2c793a5bba6465ba48ff22"
+    }
+  },
+  "images": {
+    "node": "docker.io/library/node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553",
+    "go": "docker.io/library/golang:1.26-bookworm@sha256:9fdc884aacc3bec89b20ffc69f4bb369c78210e3e4f600387b5128b12c199f81",
+    "debian": "docker.io/library/debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171"
+  },
+  "debianSnapshot": "20260910T000000Z"
+}

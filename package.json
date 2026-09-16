@@ -1,0 +1,47 @@
+{
+  "name": "agent-memory-stack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "npm run build && node dist/cli.js",
+    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "prepack": "npm run build",
+    "check:env": "node dist/runtime/config.js check server",
+    "fetch:sources": "node dist/build/cli.js --fetch",
+    "build:images": "node dist/build/cli.js"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.8.1",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.4",
+    "typescript": "7.0.2"
+  },
+  "description": "Interactive setup and container delivery for TencentDB Agent Memory",
+  "bin": {
+    "ams": "dist/cli.js"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "server/compose.yaml",
+    "server/.env.example",
+    "docker/**/*.Dockerfile",
+    "docker/debian.sources",
+    "docker/locks/**",
+    "upstream.lock.json",
+    "THIRD_PARTY_NOTICES.md",
+    "README.md",
+    "DEFAULTS-AUDIT.md",
+    "patches/ams-access.ts",
+    "patches/ams-features.tsx",
+    "VALIDATION.md"
+  ]
+}
