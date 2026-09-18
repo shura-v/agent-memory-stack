@@ -132,6 +132,20 @@ test('partial initialization repairs and rechecks missing default entities', asy
   assert.equal(f.state.calls.filter((call) => call.endpoint === '/v3/meta/agent/list').length, 2);
 });
 
+test('retry after administrator creation repairs missing defaults with the same credential', async () => {
+  for (const team of [null, { ...TEAM }]) {
+    const f = fixture({ existing: true, team, agent: null });
+    assert.deepEqual(await f.run(), result(false));
+    assert.equal(f.state.key, KEY);
+    assert.ok(!f.state.calls.some(call => call.endpoint.endsWith('init-admin')));
+    const endpoints = f.state.calls.map(call => call.endpoint);
+    assert.ok(endpoints.indexOf('/v3/meta/auth/verify') < endpoints.indexOf('/v3/meta/agent/create'));
+    assert.equal(endpoints.filter(endpoint => endpoint === '/v3/meta/team/create').length, team ? 0 : 1);
+    assert.equal(f.state.team.team_id, TEAM.team_id);
+    assert.equal(f.state.agent.agent_id, AGENT.agent_id);
+  }
+});
+
 test('inactive defaults cause an actionable failure', async () => {
   const f = fixture({ team: { ...TEAM, status: 'inactive' } });
   await assert.rejects(f.run(), /Default team.*Repair/);

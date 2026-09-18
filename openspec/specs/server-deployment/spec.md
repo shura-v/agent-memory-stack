@@ -6,6 +6,20 @@ Deploy selected memory services and model proxies in one Compose project per mac
 
 ## Requirements
 
+### Requirement: Installation-owned TDAI updates
+
+`ams update tdai` SHALL use the same remembered installation as `ams apply`, download the current `feat/server_team` commit, and save its revision, archive URL, and SHA-256 in `.ams/tdai-source.json`. It SHALL then run the existing image preparation and apply workflow. This command SHALL work from the installed npm package without a Git checkout or submodule and SHALL leave packaged sources and CLIProxyAPI selection unchanged.
+
+#### Scenario: Update an existing installation
+- **WHEN** the operator runs `ams update tdai` with saved valid configuration containing TDAI services
+- **THEN** source fetching, image fingerprints, and TDAI image revision labels use the installation's selected revision
+- **AND** later `ams apply` invocations retain that revision until another update
+- **AND** the settings snapshot preserves the previously applied source selection
+
+#### Scenario: Source download fails
+- **WHEN** GitHub commit resolution or archive download fails
+- **THEN** the previous source selection remains unchanged and apply does not begin
+
 ### Requirement: One server Compose with loopback entry points
 
 The delivery SHALL provide one Compose project per installation, containing the applications selected according to the deployment-composition specification and their required initialization/access services. The default full stack contains MemoryCore, MemoryKnowledge, MemoryPanel, MemoryProxy, CLIProxyAPI, and MCP once implemented. Only Panel, MemoryProxy, and MCP SHALL publish host ports by default, all on `127.0.0.1` and without enablement questions. Core, CLIProxyAPI, direct Knowledge HTTP tools, and Knowledge service interfaces SHALL remain internal unless an advanced .env override explicitly enables authenticated loopback exposure. MCP SHALL reach the protected Knowledge gateway over the Compose network. Raw Knowledge SHALL remain private. The stack SHALL allow the outbound connections required for LLM calls and OAuth.
@@ -61,7 +75,7 @@ Each external origin SHALL exclude credentials, API paths, queries, and fragment
 
 ### Requirement: Complete interactive server configuration
 
-Interactive setup SHALL display the initial menu. After the operator chooses Configure stack, it SHALL check for a complete visible AMS container group before any configuration question. A detected complete stack SHALL produce .env guidance and a successful early exit without prompting for an administrator key or reading credentials. This short-circuit SHALL NOT inspect or classify Core initialization state. Explicit apply SHALL remain available with the application-container-based bootstrap behavior defined by deployment-composition; the guard SHALL NOT remove that command or add administrator recovery.
+Interactive setup SHALL display the initial menu. After the operator chooses Configure stack, it SHALL check for a complete visible AMS container group before any configuration question. A detected complete stack SHALL produce .env guidance and a successful early exit without prompting for an administrator key or reading credentials. This short-circuit SHALL NOT inspect or classify Core initialization state. Explicit apply SHALL remain available with the Core-state-based bootstrap behavior defined by deployment-composition; the guard SHALL NOT remove that command or add administrator recovery.
 
 When no complete stack is detected, setup SHALL ask for actual LLM endpoint/API key, separate memory and Knowledge models, the account provider for local CLIProxyAPI, data location, and remaining interactive operational settings. It SHALL derive fresh local topology, stack origins, and host ports without questions and preserve advanced .env configuration. Local Core/CLIProxyAPI service keys SHALL be reused or generated automatically; remote credentials SHALL require explicit configuration. Existing secrets SHALL remain masked. The server .env SHALL remain the editable source for persistent settings, with generated service configurations derived from it and resolved ports persisted during apply.
 
@@ -86,20 +100,20 @@ When no complete stack is detected, setup SHALL ask for actual LLM endpoint/API 
 
 ### Requirement: Transient initial administrator credential
 
-For a fresh installation owning local Core, Setup server SHALL offer an operator-supplied admin key or generate one by default. Before administrator creation it SHALL show the resulting key in a dedicated interactive handoff with an opportunity to copy it or cancel setup. The key SHALL be passed to initialization through a transient channel and SHALL NOT be saved by the setup program in `.env`, `.admin-key`, generated files, command arguments, container environment or routine logs. Core's own credential database SHALL retain the created identity as required by its authentication model.
+When healthy local Core explicitly requires initial setup, Setup server SHALL generate an administrator key automatically without a generation or manual-entry question. Before administrator creation it SHALL show the resulting key in a dedicated interactive handoff with an opportunity to copy it or cancel setup. The key SHALL be passed to initialization through a transient channel and SHALL NOT be saved by the setup program in `.env`, `.admin-key`, generated files, command arguments, container environment or routine logs. Core's own credential database SHALL retain the created identity as required by its authentication model.
 
 #### Scenario: Generated default key
-- **WHEN** the operator accepts generation and proceeds after the key is displayed
+- **WHEN** the operator confirms OK after the automatically generated key is displayed
 - **THEN** bootstrap creates the administrator with exactly that key and verifies authentication, default team and default agent
 - **AND** no extra copy of the bootstrap key is written to deployment files
 
-#### Scenario: Operator supplies a key
-- **WHEN** the operator enters a valid custom admin key
-- **THEN** setup passes that exact value to Core without regenerating it or requiring the generated-key prefix
+#### Scenario: Existing administrator
+- **WHEN** the Core check finds an active administrator
+- **THEN** setup preserves its key and proceeds without generation or handoff
 
 #### Scenario: Cancel before initialization
-- **WHEN** the operator cancels setup or declines the key handoff
-- **THEN** no administrator is created and no supplied/generated admin key is persisted by setup
+- **WHEN** the operator cancels the key handoff before confirming OK
+- **THEN** no administrator is created and no generated admin key is persisted by setup
 
 #### Scenario: Restart an initialized installation
 - **WHEN** the configured server is restarted with existing administrator data

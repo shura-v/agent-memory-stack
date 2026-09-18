@@ -43,6 +43,7 @@ export function serviceConfigs(env: Record<string, string>) {
     skillRuntime: { allowLlmWrite: false },
   };
   const configs = {
+    'mcp.json': { port: 8425, coreUrl, coreApiKey: coreKey, knowledgeToolsUrl: deployment.connections.knowledgeTools.endpoint, serviceId },
     'core.yaml': core,
     'core-env.json': {
       TDAI_GATEWAY_CONFIG: '/config/core.yaml', TDAI_GATEWAY_HOST: '0.0.0.0', TDAI_GATEWAY_PORT: '8420',
@@ -89,6 +90,7 @@ export function serviceConfigs(env: Record<string, string>) {
     },
   };
   const files: Record<string, string[]> = {
+    mcp: ['mcp.json'],
     core: ['core.yaml', 'core-env.json', 'bootstrap-env.json'],
     knowledge: ['knowledge-env.json', 'access-env.json', 'knowledge-service.json'],
     panel: ['panel-env.json', 'panel-instances.json'],

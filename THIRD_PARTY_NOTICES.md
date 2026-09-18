@@ -1,21 +1,23 @@
 # Upstream software
 
 The build downloads the source revisions and verifies the archive SHA-256 values
-in `upstream.lock.json`. No sibling checkout is used by the build or runtime.
+in the packaged `upstream.lock.json`. `ams update tdai` overrides the TDAI source for one installation through its `.ams/tdai-source.json`; the archive checksum is verified by the same build path. No Git checkout is used by the build or runtime.
 
 | Component | Source | License |
 | --- | --- | --- |
 | MemoryCore, MemoryKnowledge, MemoryPanel, MemoryProxy | [TencentCloud/TencentDB-Agent-Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory) | MIT; upstream license copied to `/app/LICENSE` in each image |
 | CLIProxyAPI | [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | MIT; copied to `/app/LICENSE` in its image |
+| Supergateway 3.4.3 | [supercorp-ai/supergateway](https://github.com/supercorp-ai/supergateway) | MIT; retained in `/app/node_modules/supergateway` |
+| MCP TypeScript SDK 1.30.0 | [modelcontextprotocol/typescript-sdk](https://github.com/modelcontextprotocol/typescript-sdk) | MIT; retained in `/app/node_modules/@modelcontextprotocol/sdk` |
 
 Node.js, Go and Debian images are pinned by multi-platform manifest digest.
 Debian packages added by these Dockerfiles use the dated snapshot in
-`docker/debian.sources`. This pins dependency inputs; it does not promise
+`deploy/debian.sources`. This pins dependency inputs; it does not promise
 bit-for-bit identical image layers across builders.
 
 ## Dependency locks
 
-`docker/locks/*/package-lock.json` records the npm dependency versions and integrity
+`deploy/locks/*/package-lock.json` records the npm dependency versions and integrity
 checksums used by `npm ci`. The Panel, Panel web and Proxy locks derive from the
 upstream locks; Core and Knowledge are resolved for this distribution. Proxy and
 Knowledge pin `better-sqlite3` 13.0.3: its N-API implementation replaces the V8
@@ -46,6 +48,15 @@ a newly extracted source tree. Updating upstream revisions requires reviewing
 the patches, dependency locks, image pins, and regression checks together.
 
 ## Local image delivery
+
+The MCP image uses its separate integrity-pinned npm lock in `deploy/locks/mcp`.
+Its build changes Supergateway's stateful listener to bind container loopback:
+the pinned version has no listen-host option. It also launches the packaged adapter
+directly, so session expiry kills that process without leaving a shell child.
+Each replacement requires one exact match and fails the build if the upstream
+implementation changes. Only the AMS boundary
+is reachable over Compose; it authenticates callers before routing to workers.
+Review this patch when updating Supergateway.
 
 After compiling the npm package, use `node dist/build/cli.js --runtime podman
 --platform linux/arm64 --project-dir /path/to/build` (use `docker` and the target

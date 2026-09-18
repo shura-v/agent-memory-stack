@@ -18,7 +18,8 @@ test('CLI accepts plain apply without target or installation path arguments', ()
   assert.deepEqual(parseCommand([]), { action: 'setup' });
   assert.deepEqual(parseCommand(['--help']), { action: 'help' });
   assert.deepEqual(parseCommand(['apply']), { action: 'apply' });
-  for (const args of [['apply', 'server'], ['apply', 'client'], ['apply', './server'], ['apply', 'server', '/tmp'], ['unknown'], ['--help', 'unknown']]) {
+  assert.deepEqual(parseCommand(['update', 'tdai']), { action: 'update-tdai' });
+  for (const args of [['apply', 'server'], ['apply', 'client'], ['apply', './server'], ['apply', 'server', '/tmp'], ['unknown'], ['--help', 'unknown'], ['update'], ['update', 'other'], ['update', 'tdai', '/tmp']]) {
     assert.throws(() => parseCommand(args), /Usage: ams/);
   }
 });
@@ -68,11 +69,55 @@ test('standalone apply routes the remembered absolute path without setup questio
   assert.deepEqual(calls, [['server', location]]);
 });
 
+test('TDAI update uses the saved installation and applies it after resolving the revision', async () => {
+  const calls = [], notes = [];
+  const forbidden = () => assert.fail('update must not configure or inspect a new installation');
+  const targets = { recall: async target => {
+    assert.equal(target, 'server');
+    return '/tmp/saved-stack';
+  }, remember: forbidden };
+  await executeCommand(parseCommand(['update', 'tdai']), { note: (...args) => notes.push(args) }, {
+    targets,
+    detectInstallation: forbidden,
+    updateTdai: async path => {
+      calls.push(['update', path]);
+      return { previousRevision: 'previous-revision', revision: 'new-revision' };
+    },
+    workflows: { setupServer: forbidden, applyServer: async (_ui, path, options) => {
+      assert.equal(options.targets, targets);
+      calls.push(['apply', path]);
+    } },
+  });
+  assert.deepEqual(calls, [['update', '/tmp/saved-stack'], ['apply', '/tmp/saved-stack']]);
+  assert.match(notes.find(([, title]) => title === 'TDAI revision')[0], /previous-revision → new-revision/);
+});
+
+test('TDAI update requires a saved installation before downloading or applying', async () => {
+  const forbidden = () => assert.fail('missing target must stop before update or apply');
+  await assert.rejects(executeCommand(parseCommand(['update', 'tdai']), { note: forbidden }, {
+    targets: { recall: async () => undefined, remember: forbidden },
+    updateTdai: forbidden,
+    detectInstallation: forbidden,
+    workflows: { setupServer: forbidden, applyServer: forbidden },
+  }), /No saved configuration/);
+});
+
+test('failed TDAI update does not apply the installation', async () => {
+  const forbidden = () => assert.fail('failed update must not apply');
+  const failure = new Error('source unavailable');
+  await assert.rejects(executeCommand(parseCommand(['update', 'tdai']), { note() {} }, {
+    targets: { recall: async () => '/tmp/saved-stack', remember: forbidden },
+    updateTdai: async () => { throw failure; },
+    detectInstallation: forbidden,
+    workflows: { setupServer: forbidden, applyServer: forbidden },
+  }), error => error === failure);
+});
+
 test('Configure stack forwards its target store', async () => {
   const targets = { recall: async () => undefined, remember: async () => {} };
   const calls = [];
   await executeCommand(parseCommand([]), { note() {}, select: async (_id, _message, options, initial) => {
-    assert.deepEqual(options.map(option => option.label), ['Configure stack', 'Apply configuration']);
+    assert.deepEqual(options.map(option => option.label), ['Configure stack', 'Apply configuration', 'Show connection details']);
     assert.equal(initial, 'configure');
     return 'configure';
   } }, {
@@ -142,11 +187,31 @@ test('help and invalid arguments work without a TTY or configuration', () => {
   const cli = new URL('../dist/cli.js', import.meta.url);
   const output = execFileSync(process.execPath, [cli.pathname, '--help'], { encoding: 'utf8' });
   assert.match(output, /ams apply\s+Apply saved configuration/);
+  assert.match(output, /ams update tdai\s+Update TDAI and apply saved configuration/);
   assert.doesNotMatch(output, /apply server/);
   assert.doesNotMatch(output, /client/i);
   assert.doesNotMatch(output, /prepared server images/);
   assert.throws(() => execFileSync(process.execPath, [cli.pathname, 'apply', './server'], { stdio: 'pipe' }), error => {
     assert.match(error.stderr.toString(), /Usage: ams/);
+    return error.status === 1;
+  });
+});
+
+test('Show connection details uses the remembered installation without configuring or applying', async () => {
+  const forbidden = () => assert.fail('Connection details must not configure, apply, or inspect the setup guard');
+  let shown;
+  await executeCommand(parseCommand([]), { note() {}, select: async () => 'connections' }, {
+    targets: { recall: async () => '/tmp/saved-stack', remember: forbidden },
+    workflows: { setupServer: forbidden, applyServer: forbidden }, detectInstallation: forbidden,
+    showConnectionDetails: async (_ui, directory) => { shown = directory; },
+  });
+  assert.equal(shown, '/tmp/saved-stack');
+});
+
+test('TDAI update requires an interactive terminal before reading configuration or downloading', () => {
+  const cli = new URL('../dist/cli.js', import.meta.url);
+  assert.throws(() => execFileSync(process.execPath, [cli.pathname, 'update', 'tdai'], { stdio: 'pipe' }), error => {
+    assert.match(error.stderr.toString(), /Run ams in an interactive terminal/);
     return error.status === 1;
   });
 });

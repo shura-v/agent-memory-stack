@@ -13,7 +13,7 @@ const questions = [
   ['select', ui => ui.select('model', 'Model', choices, 'first')],
   ['multiselect', ui => ui.multiselect('services', 'Services', choices, ['first'])],
   ['confirm', ui => ui.confirm('start', 'Start?')],
-  ['confirm', ui => ui.handoff('synthetic-admin-key')],
+  ['select', ui => ui.handoff('synthetic-admin-key')],
 ];
 
 test('every prompt distinguishes Escape from Ctrl+C and releases its key listener', async () => {
@@ -60,8 +60,22 @@ function terminal() {
   const adapter = Object.fromEntries(['text', 'password', 'select', 'multiselect', 'confirm'].map(method => [
     method, options => prompts[method]({ ...options, input, output }),
   ]));
-  return { input, output, ui: createInteraction({ ...prompts, ...adapter }, input), rendered: () => rendered };
+  return { input, output, ui: createInteraction({ ...prompts, ...adapter }, input, output), rendered: () => rendered };
 }
+
+test('administrator key handoff has one OK action and Enter continues', { timeout: 2000 }, async () => {
+  const { input, output, ui, rendered } = terminal();
+  try {
+    const handoff = ui.handoff('synthetic-admin-key');
+    const screen = rendered();
+    assert.match(screen, /synthetic-admin-key\n\n/);
+    assert.match(screen, /OK/);
+    assert.doesNotMatch(screen, /Yes|No|Continue initialization\?/);
+    input.write('\r');
+    await handoff;
+    assert.equal(input.listenerCount('keypress'), 0);
+  } finally { input.destroy(); output.destroy(); }
+});
 
 test('real Clack stream keeps arrow navigation and recognizes a standalone Escape', { timeout: 2000 }, async () => {
   const { input, output, ui } = terminal();

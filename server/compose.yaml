@@ -166,6 +166,41 @@ services:
     depends_on:
       config:
         condition: service_completed_successfully
+  mcp:
+    restart: unless-stopped
+    networks:
+      - stack
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    image: ${MCP_IMAGE}
+    volumes:
+      - ./generated:/config:ro
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8425/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+    depends_on:
+      config:
+        condition: service_completed_successfully
+      bootstrap:
+        condition: service_completed_successfully
+      access:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:8425:8425
   bootstrap:
     image: ${RUNTIME_IMAGE}
     user: "0:0"

@@ -1,5 +1,5 @@
 import { DeploymentError } from "../runtime/errors.js";
-export const serviceNames = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api'] as const;
+export const serviceNames = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'mcp'] as const;
 export type Service = typeof serviceNames[number];
 export type Mode = 'local' | 'remote' | 'disabled';
 export type Helper = 'config' | 'bootstrap' | 'access' | 'knowledge-service';
@@ -8,13 +8,14 @@ export const catalog: { value: Service; label: string; description: string }[] =
   { value: 'knowledge', label: 'Knowledge', description: 'Wiki and document processing' },
   { value: 'panel', label: 'Panel', description: 'web interface for managing the stack' },
   { value: 'memory-proxy', label: 'MemoryProxy', description: 'adds memory context to agent requests' },
+  { value: 'mcp', label: 'MCP', description: 'Knowledge tools over Streamable HTTP' },
   { value: 'cli-proxy-api', label: 'CLIProxyAPI', description: 'provides API access to supported AI providers' },
 ];
 export type Connection = { mode: Mode; required: boolean; consumers: Service[]; endpoint?: string; key?: string; origin?: string };
 export type ServiceInterface = { service: Service | 'access' | 'knowledge-service'; field: string; port: number; target: number; audience: 'user' | 'service' };
 export type Deployment = {
   services: Service[]; helpers: Helper[]; containers: string[]; requiredImages: (Service | 'runtime')[]; dataDirectories: string[];
-  fields: string[]; connections: Record<'core' | 'model' | 'knowledge' | 'panel' | 'proxy', Connection>;
+  fields: string[]; connections: Record<'core' | 'model' | 'knowledge' | 'panel' | 'proxy' | 'knowledgeTools', Connection>;
   interfaces: ServiceInterface[]; readiness: { service: string; dependsOn: string[] }[];
 };
 
@@ -43,7 +44,7 @@ export function resolveDeployment(env: Record<string, string>, { requireConnecti
     if (explicit && explicit !== mode) throw new DeploymentError(`${name}_MODE conflicts with AMS_SERVICES or a required dependency`);
     return { mode, required: used.length > 0 && required, consumers: used, ...(endpoint && mode !== 'disabled' ? { endpoint } : {}), ...(key && mode !== 'disabled' ? { key } : {}), ...(origin && mode !== 'disabled' ? { origin } : {}) };
   };
-  const core = connection('CORE', 'core', ['knowledge', 'panel', 'memory-proxy'], true,
+  const core = connection('CORE', 'core', ['knowledge', 'panel', 'memory-proxy', 'mcp'], true,
     has('core') ? 'http://core:8420' : env.REMOTE_CORE_URL, has('core') ? env.CORE_API_KEY : env.REMOTE_CORE_API_KEY);
   const model = connection('MODEL', 'cli-proxy-api', ['memory-proxy'], true,
     has('cli-proxy-api') ? 'http://cli-proxy-api:8317/v1' : env.REMOTE_MODEL_BASE_URL, has('cli-proxy-api') ? env.CLIPROXY_API_KEY : env.REMOTE_MODEL_API_KEY);
@@ -52,7 +53,9 @@ export function resolveDeployment(env: Record<string, string>, { requireConnecti
   const panel = connection('PANEL', 'panel', ['knowledge'], true,
     has('panel') ? 'http://panel:8123' : env.REMOTE_PANEL_URL, core.key, env.PANEL_PUBLIC_URL);
   const proxy = connection('PROXY', 'memory-proxy', ['panel'], false, undefined, undefined, env.MEMORY_PROXY_PUBLIC_URL);
-  const connections = { core, model, knowledge, panel, proxy };
+  const knowledgeTools: Connection = { mode: has('mcp') ? has('knowledge') ? 'local' : 'remote' : 'disabled', required: has('mcp'), consumers: has('mcp') ? ['mcp'] : [],
+    ...(has('mcp') ? { endpoint: has('knowledge') ? 'http://access:8080' : env.REMOTE_KNOWLEDGE_TOOLS_URL, key: core.key } : {}) };
+  const connections = { core, model, knowledge, panel, proxy, knowledgeTools };
   if (services.some(name => name !== 'cli-proxy-api')) fields.add('LOG_LEVEL');
   if (has('core') || has('knowledge')) for (const field of ['LLM_BASE_URL', 'LLM_API_KEY']) fields.add(field);
   if (has('core')) for (const field of ['CORE_API_KEY', 'MEMORY_LLM_MODEL', 'MEMORY_LLM_MAX_TOKENS', 'MEMORY_LLM_TIMEOUT_MS', 'MEMORY_PROMPT_MODE']) fields.add(field);
@@ -61,6 +64,7 @@ export function resolveDeployment(env: Record<string, string>, { requireConnecti
   if (has('memory-proxy')) for (const field of ['MEMORY_PROXY_PORT', 'MEMORY_PROXY_PUBLIC_URL']) fields.add(field);
   if (has('cli-proxy-api')) for (const field of ['CLIPROXY_API_KEY', 'CLIPROXY_AUTH_PROVIDER']) fields.add(field);
   if (core.mode === 'remote') for (const field of ['REMOTE_CORE_URL', 'REMOTE_CORE_API_KEY']) fields.add(field);
+  if (knowledgeTools.mode === 'remote') fields.add('REMOTE_KNOWLEDGE_TOOLS_URL');
   if (model.mode === 'remote') for (const field of ['REMOTE_MODEL_BASE_URL', 'REMOTE_MODEL_API_KEY']) fields.add(field);
   if (knowledge.mode === 'remote') {
     if (env.KNOWLEDGE_TOOLS_PUBLIC_ENABLED === 'true') fields.add('KNOWLEDGE_PUBLIC_URL');
@@ -76,6 +80,7 @@ export function resolveDeployment(env: Record<string, string>, { requireConnecti
   if (knowledge.mode !== 'disabled') fields.add('KNOWLEDGE_TOOLS_PUBLIC_ENABLED');
   if (has('knowledge') && env.KNOWLEDGE_TOOLS_PUBLIC_ENABLED === 'true') publish('access', 'KNOWLEDGE_PORT', 8422, 8080, 'user');
   if (has('panel')) publish('panel', 'PANEL_PORT', 8123, 8123, 'user');
+  if (has('mcp')) publish('mcp', 'MCP_PORT', 8425, 8425, 'user');
   for (const [service, prefix, defaultPort, target] of [
     ['core', 'CORE', 8420, 8420], ['cli-proxy-api', 'CLIPROXY', 8317, 8317], ['knowledge', 'KNOWLEDGE', 8423, 8423],
   ] as const) {
@@ -92,10 +97,11 @@ export function resolveDeployment(env: Record<string, string>, { requireConnecti
   const containers = [...services, ...helpers];
   const readiness = services.map(service => ({ service, dependsOn: service === 'core' || service === 'cli-proxy-api' ? [] : has('core') ? ['bootstrap'] : [] }));
   if (has('memory-proxy') && has('cli-proxy-api')) readiness.find(edge => edge.service === 'memory-proxy')!.dependsOn.push('cli-proxy-api');
+  if (has('mcp') && has('knowledge')) readiness.find(edge => edge.service === 'mcp')!.dependsOn.push('access');
   if (requireConnections) {
     for (const field of fields) if (/^REMOTE_/.test(field) && !env[field]?.trim()) throw new DeploymentError(`Set ${field} in .env for the configured remote dependency`);
     if (knowledge.mode === 'remote' && env.KNOWLEDGE_TOOLS_PUBLIC_ENABLED === 'true' && !env.KNOWLEDGE_PUBLIC_URL?.trim()) throw new DeploymentError('Configure KNOWLEDGE_PUBLIC_URL for remote Knowledge tools');
     if (proxy.mode === 'remote' && !env.MEMORY_PROXY_PUBLIC_URL?.trim()) throw new DeploymentError('Configure MEMORY_PROXY_PUBLIC_URL for remote agent guidance');
   }
-  return { services, helpers, containers, requiredImages: [...services, 'runtime'], dataDirectories: services.map(service => service === 'memory-proxy' ? 'proxy' : service), fields: [...fields], connections, interfaces, readiness };
+  return { services, helpers, containers, requiredImages: [...services, 'runtime'], dataDirectories: services.filter(service => service !== 'mcp').map(service => service === 'memory-proxy' ? 'proxy' : service), fields: [...fields], connections, interfaces, readiness };
 }

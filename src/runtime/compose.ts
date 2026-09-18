@@ -11,8 +11,10 @@ import { readEnv, atomicWrite } from '../config/files.js';
 import { validateEnv } from '../config/settings.js';
 import { resolveDeployment } from '../deployment/model.js';
 import type { Deployment } from '../deployment/model.js';
-import { runProcess } from './process.js';
+import { ProcessFailure, runProcess } from './process.js';
 import type { Runner } from './process.js';
+import { listConnectionKeys, readConnectionKey } from './connection-keys.js';
+import type { ProbeConfig } from './integration.js';
 import { reservePublishedPorts } from './ports.js';
 import type { PortReservation } from './ports.js';
 
@@ -20,21 +22,21 @@ export type Provider = 'docker' | 'podman' | 'podman-compose' | 'uvx-podman-comp
 export type ReadinessResult = { pending: string[] };
 export interface DeploymentRuntime {
   checkProvider?(): Promise<void>;
-  hasApplicationContainers?(): Promise<boolean>;
   snapshot?(manifest: ImageManifest): Promise<void>;
   reservePorts?(manifest: ImageManifest, settings: Record<string, string>): Promise<PortReservation>;
   preflight(manifest: ImageManifest, settings?: Record<string, string>): Promise<ReadinessResult | void>;
-  apply(adminKey?: string, options?: { allowPending?: boolean }): Promise<ReadinessResult | void>;
+  apply(adminKey?: string, options?: { allowPending?: boolean; createAdminKey?: () => Promise<string> }): Promise<ReadinessResult | void>;
   hasProviderAuthorization?(provider: AccountProvider): Promise<boolean>;
   login(provider: AccountProvider): Promise<void>;
   status(): Promise<string>;
 }
-export type AppliedInventory = { version: 1; services: string[] };
-const managedNames = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'config', 'bootstrap', 'access', 'knowledge-service'];
+export type AppliedInventory = { version: 1; services: string[]; coreInitialized?: boolean };
+const managedNames = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'mcp', 'config', 'bootstrap', 'access', 'knowledge-service'];
 export async function readAppliedInventory(directory: string): Promise<AppliedInventory | undefined> {
   try {
     const data = JSON.parse(await readFile(join(directory, '.ams/applied.json'), 'utf8')) as AppliedInventory;
-    if (data.version !== 1 || !Array.isArray(data.services) || data.services.some(name => !managedNames.includes(name))) throw new DeploymentError();
+    if (data.version !== 1 || !Array.isArray(data.services) || data.services.some(name => !managedNames.includes(name))
+      || (data.coreInitialized !== undefined && typeof data.coreInitialized !== 'boolean')) throw new DeploymentError();
     return data;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
@@ -44,7 +46,7 @@ export async function readAppliedInventory(directory: string): Promise<AppliedIn
 
 /** Addresses are resolved for the actual consuming network, never the host process. */
 export function integrationConfig(plan: Deployment, mode: 'preflight' | 'verify') {
-  const checks: { name: string; kind: 'core' | 'model' | 'knowledge' | 'panel'; url: string; key: string; serviceId: string }[] = [];
+  const checks: ProbeConfig['checks'] = [];
   for (const kind of ['core', 'model', 'knowledge', 'panel'] as const) {
     const connection = plan.connections[kind];
     if (connection.mode === 'disabled' || !connection.endpoint || !connection.key || (mode === 'preflight' && connection.mode !== 'remote')) continue;
@@ -52,10 +54,16 @@ export function integrationConfig(plan: Deployment, mode: 'preflight' | 'verify'
     // the service key; actual account/model authorization remains a separate step.
     checks.push({ name: kind, kind, url: connection.endpoint, key: connection.key, serviceId: 'ams' });
   }
-  const { core, knowledge, panel } = plan.connections;
+  const { core, knowledge, panel, knowledgeTools } = plan.connections;
+  if (knowledgeTools.endpoint && knowledgeTools.key && (mode === 'verify' || knowledgeTools.mode === 'remote')) {
+    checks.push({ name: 'protected Knowledge tools', kind: 'knowledge-tools', url: knowledgeTools.endpoint, key: knowledgeTools.key, serviceId: 'ams' });
+  }
+  const toolsPairings = core.endpoint && core.key && knowledgeTools.endpoint
+    && (mode === 'verify' || core.mode === 'remote' && knowledgeTools.mode === 'remote')
+    ? [{ coreUrl: core.endpoint, knowledgeToolsUrl: knowledgeTools.endpoint, key: core.key }] : [];
   const pairing = core.endpoint && core.key && knowledge.endpoint && panel.endpoint
     && (mode === 'verify' || [core, knowledge, panel].every(item => item.mode === 'remote'));
-  return { mode, checks, pairings: pairing ? [{ coreUrl: core.endpoint!, knowledgeUrl: knowledge.endpoint!, panelUrl: panel.endpoint!, key: core.key! }] : [] };
+  return { mode, checks, toolsPairings, pairings: pairing ? [{ coreUrl: core.endpoint!, knowledgeUrl: knowledge.endpoint!, panelUrl: panel.endpoint!, key: core.key! }] : [] };
 }
 
 export function runtimeFor(directory: string, provider: Provider, run: Runner = runProcess): DeploymentRuntime {
@@ -86,7 +94,8 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
   const compose = (args: string[], input?: string, interactive = false) => run({ command, args: [...prefix,
     '--project-name', project, '--env-file', join(directory, '.ams/compose.env'), '-f', join(directory, 'compose.yaml'), ...args], cwd: directory, input, interactive, env: processEnv,
     label: `Compose ${args[0]} (${args.filter(name => managedNames.includes(name)).join(', ') || 'project'})${args.includes('initialize') ? ' administrator initialization' : ''}`,
-    classifyPortConflict: args[0] === 'up' });
+    classifyPortConflict: args[0] === 'up',
+    safeErrorPrefix: args[0] === 'run' && args.includes('bootstrap') ? 'Bootstrap failed: ' : undefined });
   const readPlan = async () => resolveDeployment(validateEnv(await readEnv(join(directory, '.env'))));
   async function probe(plan: Deployment, manifest: ImageManifest, mode: 'preflight' | 'verify'): Promise<ReadinessResult> {
     const config = integrationConfig(plan, mode);
@@ -136,11 +145,6 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
   }
   return {
     checkProvider,
-    async hasApplicationContainers() {
-      const plan = await readPlan();
-      const existing = new Set((await ownedContainers()).map(container => container.service));
-      return plan.services.every(service => existing.has(service));
-    },
     async reservePorts(manifest, settings) {
       await checkProvider();
       return reservePublishedPorts(engine, project, manifest, resolveDeployment(settings).interfaces, run);
@@ -170,7 +174,7 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
       const plan = await readPlan();
       if (adminKey !== undefined && !plan.services.includes('core')) throw new DeploymentError('Administrator initialization belongs to the machine running Core');
       const manifest = await loadManifest(join(directory, '.ams/images.json'), plan.requiredImages as ImageService[]);
-      await readAppliedInventory(directory);
+      const applied = await readAppliedInventory(directory);
       await compose(['config']);
       const owned = await ownedContainers();
       if (owned.length) await run({ command: engine, args: ['stop', ...owned.map(item => item.id)], label: 'Stop this installation before applying configuration' });
@@ -182,7 +186,27 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
         await compose(['up', '-d', '--no-deps', '--force-recreate', 'core']);
         await waitFor('core', 'healthy');
         ready.add('core');
-        if (adminKey !== undefined) await compose(['run', '--rm', '-T', '--no-deps', 'bootstrap', '--import', '/app/runtime/environment.js', '/app/runtime/bootstrap.js', 'initialize'], JSON.stringify({ adminKey }));
+        if (adminKey === undefined && options.createAdminKey) {
+          try {
+            await compose(['run', '--rm', '-T', '--no-deps', 'bootstrap']);
+          } catch (error) {
+            if (!(error instanceof ProcessFailure) || error.exitCode !== 2) throw error;
+            adminKey = await options.createAdminKey();
+          }
+          // An administrator can exist after initialization failed before its
+          // default team or agent was created. Resume with the same stored key.
+          if (adminKey === undefined && (!applied?.services.includes('core') || applied.coreInitialized === false)) {
+            const key = (await listConnectionKeys(directory, provider, run)).find(item => item.userType === 'system_admin');
+            if (!key) throw new DeploymentError('Cannot finish administrator initialization: no active administrator key is available. Restore administrator access before applying.');
+            adminKey = await readConnectionKey(directory, provider, key.keyId, run);
+          }
+        }
+        if (adminKey !== undefined) {
+          // Old inventory may outlive a replaced database. Keep its service
+          // ownership records, but do not mistake an interrupted reinit for success.
+          if (applied) await atomicWrite(join(directory, '.ams/applied.json'), JSON.stringify({ ...applied, coreInitialized: false }, null, 2) + '\n');
+          await compose(['run', '--rm', '-T', '--no-deps', 'bootstrap', '--import', '/app/runtime/environment.js', '/app/runtime/bootstrap.js', 'initialize'], JSON.stringify({ adminKey }));
+        }
         await compose(['up', '-d', '--no-deps', '--force-recreate', 'bootstrap']);
         await waitFor('bootstrap', 'completed');
         ready.add('bootstrap');

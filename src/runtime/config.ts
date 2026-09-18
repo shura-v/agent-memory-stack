@@ -14,7 +14,7 @@ export async function generate(directory: string, { dataRoot, uid }: { dataRoot?
   await chmod(generated, 0o700);
   if (uid !== undefined && process.getuid?.() === 0) await chown(generated, uid, uid);
   const configs = serviceConfigs(env);
-  for (const name of ['core.yaml', 'core-env.json', 'bootstrap-env.json', 'knowledge-env.json', 'access-env.json', 'knowledge-service.json', 'panel-env.json', 'panel-instances.json', 'proxy.yaml', 'proxy-env.json', 'cli-proxy-api.yaml']) {
+  for (const name of ['core.yaml', 'core-env.json', 'bootstrap-env.json', 'knowledge-env.json', 'access-env.json', 'knowledge-service.json', 'panel-env.json', 'panel-instances.json', 'proxy.yaml', 'proxy-env.json', 'cli-proxy-api.yaml', 'mcp.json']) {
     if (!(name in configs)) await rm(join(generated, name), { force: true });
   }
   for (const [name, value] of Object.entries(configs)) {

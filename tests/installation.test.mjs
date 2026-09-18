@@ -74,3 +74,9 @@ test('container discovery commands are bounded and stalled child processes termi
   assert.ok(fake.calls.every(call => call.timeoutMs === 5000));
   await assert.rejects(runProcess({ command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], timeoutMs: 50 }), ProcessFailure);
 });
+
+
+test('complete pre-MCP installations remain protected from repeat setup', async () => {
+  const old = containers(serviceNames.filter(service => service !== 'mcp'));
+  assert.deepEqual(await detectExistingInstallation(runner({ docker: old }).run), { engine: 'docker', project });
+});

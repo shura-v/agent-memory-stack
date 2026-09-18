@@ -46,6 +46,7 @@ async function save(f, answers = {}, options = {}) {
 }
 function runtime(dir, overrides = {}) {
   return {
+    hasProviderAuthorization: async () => true,
     preflight: async () => ({ pending: [] }),
     snapshot: async () => snapshotSettings(dir),
     apply: async () => { await rm(join(dir, '.ams/apply-pending'), { force: true }); },
@@ -84,7 +85,7 @@ test('standalone apply reloads edited .env, keeps its exact bytes and regenerate
       assert.equal(directory, f.dir); assert.equal(provider, 'uvx-podman-compose');
       return runtime(f.dir, {
         preflight: async (_images, settings) => assert.equal(settings.CLIPROXY_SERVICE_PORT, '28317'),
-        apply: async key => { applied++; assert.equal(key, undefined); },
+        apply: async (key, { createAdminKey }) => { applied++; assert.equal(key, undefined); assert.equal(createAdminKey, undefined); },
       });
     },
   });
@@ -101,7 +102,7 @@ test('apply compares the selected provider instead of accepting another saved ac
     const settings = await readEnv(join(f.dir, '.env'));
     settings.CLIPROXY_AUTH_PROVIDER = provider;
     await writeFile(join(f.dir, '.env'), encodeEnv(settings));
-    const questions = ui({ login: true });
+    const questions = ui({ login: provider });
     const authorized = new Set(['codex']);
     const logins = [];
     await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
@@ -115,16 +116,80 @@ test('apply compares the selected provider instead of accepting another saved ac
 
 test('provider login cannot silently succeed without saving the selected authorization', async t => {
   const f = await fixture(t); await save(f);
-  await assert.rejects(applyServer(ui({ login: true }), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
+  await assert.rejects(applyServer(ui({ login: 'codex' }), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
     hasProviderAuthorization: async () => false, login: async () => {},
   }) }), /login did not save authorization/);
 });
 
-test('cancelling administrator handoff retains a saved configuration and does not prepare images', async t => {
+test('login offers provider names, saves the selected provider, and checks its own credentials', async t => {
+  const f = await fixture(t); await save(f);
+  await writeFile(join(f.dir, '.env'), await readFile(join(f.dir, '.env'), 'utf8') + '# Keep this operator note\n');
+  const questions = ui({ login: 'claude' }); const select = questions.select;
+  questions.select = async (id, label, choices, initial) => {
+    if (id === 'login') {
+      assert.deepEqual(choices.map(choice => choice.value), ['codex', 'claude']);
+      assert.equal(initial, 'codex');
+      assert.match(choices[0].label, /ChatGPT/); assert.equal(choices[1].label, 'Claude');
+    }
+    return select.call(questions, id, label, choices, initial);
+  };
+  const checked = [], loggedIn = []; const authorized = new Set();
+  await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
+    hasProviderAuthorization: async selected => { checked.push(selected); return authorized.has(selected); },
+    login: async selected => { loggedIn.push(selected); authorized.add(selected); },
+  }) });
+  assert.deepEqual(loggedIn, ['claude']);
+  assert.deepEqual(checked, ['codex', 'claude', 'claude']);
+  assert.equal((await readEnv(join(f.dir, '.env'))).CLIPROXY_AUTH_PROVIDER, 'claude');
+  assert.match(await readFile(join(f.dir, '.env'), 'utf8'), /# Keep this operator note/);
+  assert.match(questions.notes.at(-1), /Run ams and choose Show connection details/);
+  const appliedEnv = await readFile(join(f.dir, '.env'), 'utf8');
+  assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/last-applied-inputs.json'), 'utf8'))['.env'], appliedEnv);
+  await writeFile(join(f.dir, '.env'), appliedEnv.replace('CLIPROXY_AUTH_PROVIDER=claude', 'CLIPROXY_AUTH_PROVIDER=codex'));
+  await assert.rejects(applyServer(ui(), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
+    apply: async () => { throw new Error('Startup failed'); },
+  }) }), /Startup failed/);
+  assert.equal(await readFile(join(f.dir, '.ams/previous-settings/.env'), 'utf8'), appliedEnv);
+});
+
+test('choosing an already authorized alternate provider skips login and retains the new selection', async t => {
+  const f = await fixture(t); await save(f);
+  const questions = ui({ login: 'claude' });
+  await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
+    hasProviderAuthorization: async selected => selected === 'claude',
+    login: async () => assert.fail('Existing Claude authorization must be reused'),
+  }) });
+  assert.equal((await readEnv(join(f.dir, '.env'))).CLIPROXY_AUTH_PROVIDER, 'claude');
+  assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/last-applied-inputs.json'), 'utf8'))['.env'], await readFile(join(f.dir, '.env'), 'utf8'));
+  assert.match(questions.notes.at(-1), /Run ams and choose Show connection details/);
+});
+
+test('failed alternate-provider login keeps the chosen provider for a retry', async t => {
+  const f = await fixture(t); await save(f);
+  await assert.rejects(applyServer(ui({ login: 'claude' }), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
+    hasProviderAuthorization: async () => false, login: async () => { throw new Error('Login cancelled'); },
+  }) }), /Login cancelled/);
+  assert.equal((await readEnv(join(f.dir, '.env'))).CLIPROXY_AUTH_PROVIDER, 'claude');
+  assert.match(JSON.parse(await readFile(join(f.dir, '.ams/last-applied-inputs.json'), 'utf8'))['.env'], /CLIPROXY_AUTH_PROVIDER="codex"/);
+});
+
+test('cancelling administrator handoff after Core starts retains configuration and prevents initialization', async t => {
   const f = await fixture(t);
   await save(f, { services: ['core'] });
   const questions = ui({ apply: true, cancelHandoff: true });
-  await assert.rejects(setupServer(questions, { targets: f.targets, listModels: async () => [], runtime: () => runtime(f.dir), prepareImages: forbidden }), Cancelled);
+  const events = [];
+  await assert.rejects(setupServer(questions, {
+    targets: f.targets, listModels: async () => [],
+    prepareImages: async () => { events.push('images'); return images; },
+    runtime: () => runtime(f.dir, {
+      apply: async (_key, { createAdminKey }) => {
+        events.push('Core ready without administrator');
+        await createAdminKey();
+        assert.fail('Cancelled handoff must not initialize Core');
+      },
+    }),
+  }), Cancelled);
+  assert.deepEqual(events, ['images', 'Core ready without administrator']);
   assert.equal((await readEnv(join(f.dir, '.env'))).AMS_SERVICES, 'core');
   assert.deepEqual(f.remembered, [['server', f.dir], ['server', f.dir]]);
   assert.equal(questions.handoffs.length, 1);
@@ -133,15 +198,18 @@ test('cancelling administrator handoff retains a saved configuration and does no
   }
 });
 
-test('existing application containers apply without administrator prompts, handoff or initialization', async t => {
+test('Core with an active administrator applies without prompts, handoff or initialization', async t => {
   const f = await fixture(t);
   await save(f, { services: ['core'] });
   await writeFile(join(f.dir, '.ams/applied.json'), JSON.stringify({ version: 1, services: ['core', 'config', 'bootstrap'] }));
   const secret = 'existing-admin-secret';
   const questions = ui({ admin: secret });
   await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
-    hasApplicationContainers: async () => true,
-    apply: async key => { assert.equal(key, undefined); },
+    apply: async (key, { createAdminKey }) => {
+      assert.equal(key, undefined);
+      assert.equal(typeof createAdminKey, 'function');
+      // An active administrator means the runtime never calls createAdminKey.
+    },
   }) });
   assert.ok(!questions.asked.includes('admin'));
   assert.ok(!questions.asked.includes('generate:admin'));
@@ -151,17 +219,37 @@ test('existing application containers apply without administrator prompts, hando
   }
 });
 
-test('empty Core directory does not turn a fresh deployment into an existing-key prompt', async t => {
+test('Core without an administrator receives an automatically generated key after startup', async t => {
   const f = await fixture(t);
   await save(f, { services: ['core'] });
   await mkdir(join(f.dir, 'data/core'), { recursive: true });
   const questions = ui();
   await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
-    hasApplicationContainers: async () => false,
-    apply: async key => assert.match(key, /^sk-ams-admin-/),
+    apply: async (key, { createAdminKey }) => {
+      assert.equal(key, undefined);
+      assert.deepEqual(questions.handoffs, []);
+      assert.match(await createAdminKey(), /^sk-ams-admin-[a-f0-9]{64}$/);
+    },
   }) });
-  assert.ok(questions.asked.includes('generate:admin'));
+  assert.ok(!questions.asked.includes('generate:admin'));
+  assert.ok(!questions.asked.includes('admin'));
   assert.equal(questions.handoffs.length, 1);
+});
+
+test('a startup port retry reuses the generated administrator key and its acknowledged handoff', async t => {
+  const f = await fixture(t);
+  await save(f, { services: ['core'] });
+  const questions = ui(), keys = [];
+  await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
+    reservePorts: async () => ({ ports: {}, release: async () => {} }),
+    apply: async (_key, { createAdminKey }) => {
+      keys.push(await createAdminKey());
+      if (keys.length === 1) throw new PortBindingConflict('busy');
+    },
+  }) });
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+  assert.deepEqual(questions.handoffs, [keys[0]]);
 });
 
 test('failed image preparation retains newly saved desired configuration and existing generated files', async t => {

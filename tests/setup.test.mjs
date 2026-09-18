@@ -11,15 +11,19 @@ import { fields, generateKey, validateEnv } from '../dist/config/settings.js';
 import { readEnv, encodeEnv } from '../dist/config/files.js';
 import { run } from '../dist/cli/run.js';
 import { Back, Cancelled } from '../dist/setup/interaction.js';
+import { ModelAccessError } from '../dist/setup/model-discovery.js';
+import { navigate } from '../dist/setup/navigation.js';
 
 // Workflow tests never contact a provider unless they inject a discovery fixture.
 const noModels = async () => [];
 const targets = { recall: async () => undefined, remember: async () => {} };
-const setupServer = (ui, options = {}) => runSetupServer(ui, { targets, listModels: noModels, prepareImages: async () => structuredClone(manifest), ...options });
+const setupServer = (ui, options = {}) => runSetupServer(ui, { targets, listModels: noModels, prepareImages: async () => structuredClone(manifest), ...options,
+  ...(options.runtime ? { runtime: (...args) => ({ hasProviderAuthorization: async () => true, ...options.runtime(...args) }) } : {}),
+});
 const serverQuestions = (ui, existing, services, options = {}) => askServerQuestions(ui, existing, services, { listModels: noModels, ...options });
 
 const settings = validateEnv({ LLM_BASE_URL: 'https://provider.test.invalid/v1', MEMORY_PROXY_PUBLIC_URL: 'https://models.test.invalid', KNOWLEDGE_PUBLIC_URL: 'https://wiki.other.invalid', PANEL_PUBLIC_URL: 'https://panel.third.invalid', LLM_API_KEY: 'provider-\'"\\${VALUE}', MEMORY_LLM_MODEL: 'memory-test', KNOWLEDGE_LLM_MODEL: 'wiki-test', CORE_API_KEY: generateKey('core'), CLIPROXY_API_KEY: generateKey('cliproxy') });
-const manifest = { schemaVersion: 1, images: Object.fromEntries(['core','knowledge','panel','memory-proxy','cli-proxy-api','runtime'].map((service, i) => [service, { id: 'sha256:' + String(i + 1).repeat(64), tag: `${service}:test`, platform: 'linux/arm64', repoDigests: [] }])) };
+const manifest = { schemaVersion: 1, images: Object.fromEntries(['core','knowledge','panel','memory-proxy','cli-proxy-api','mcp','runtime'].map((service, i) => [service, { id: 'sha256:' + String(i + 1).repeat(64), tag: `${service}:test`, platform: 'linux/arm64', repoDigests: [] }])) };
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'ams-setup-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -105,7 +109,7 @@ test('output tokens and LLM timeouts use env defaults or saved values without wi
 test('server writes reviewed config, keeps admin only in handoff and runtime memory', async t => {
   const dir=await fixture(t); const destination=join(dir,'server'); const calls=[];
   const ui=interaction({directory:destination,provider:'podman-compose'});
-  await setupServer(ui,{runtime:()=>({preflight:async()=>{calls.push('preflight');}, apply:async key=>{calls.push(key);},login:async()=>{calls.push('login');},status:async()=>''})});
+  await setupServer(ui,{runtime:()=>({preflight:async()=>{calls.push('preflight');}, apply:async (key, {createAdminKey})=>{assert.equal(key,undefined); calls.push(await createAdminKey());},login:async()=>{calls.push('login');},status:async()=>''})});
   assert.ok(!ui.asked.includes('server-action'));
   assert.ok(!ui.asked.includes('manifest'));
   assert.equal(calls[0],'preflight'); assert.match(calls[1],/^sk-ams-admin-[a-f0-9]{64}$/); assert.equal(ui.handoffs[0],calls[1]);
@@ -115,14 +119,14 @@ test('server writes reviewed config, keeps admin only in handoff and runtime mem
   assert.ok(!(await readFile(join(destination,'.ams/compose.env'),'utf8')).includes(settings.LLM_API_KEY));
   await assert.rejects(readFile(join(destination,'.admin-key')),{code:'ENOENT'});
 });
-test('declined apply or cancelled handoff retains saved settings and performs no apply', async t => {
+test('declined apply or cancelled handoff retains saved settings and never initializes Core', async t => {
   const dir=await fixture(t); await mkdir(join(dir,'.ams')); const before=encodeEnv(settings); await writeFile(join(dir,'.env'),before);
   for(const cancellation of [{apply:false},{cancelHandoff:true}]) {
-    const ui=interaction({directory:dir,LOG_LEVEL:'warn',...cancellation}); let applied=false;
-    const result = setupServer(ui,{prepareImages:async()=>assert.fail('cancelled before image preparation'),runtime:()=>({preflight:async()=>{},apply:async()=>{applied=true;},login:async()=>{},status:async()=>''})});
+    const ui=interaction({directory:dir,LOG_LEVEL:'warn',...cancellation}); let initialized=false, prepared=false;
+    const result = setupServer(ui,{prepareImages:async()=>{prepared=true; return structuredClone(manifest);},runtime:()=>({preflight:async()=>{},apply:async (_key,{createAdminKey})=>{await createAdminKey(); initialized=true;},login:async()=>{},status:async()=>''})});
     if (cancellation.apply === false) await result;
     else await assert.rejects(result, Cancelled);
-    assert.equal((await readEnv(join(dir,'.env'))).LOG_LEVEL,'warn'); assert.equal(applied,false);
+    assert.equal((await readEnv(join(dir,'.env'))).LOG_LEVEL,'warn'); assert.equal(initialized,false); assert.equal(prepared,cancellation.apply !== false);
   }
 });
 
@@ -145,7 +149,7 @@ test('fresh setup prepares the full implemented stack images after approval and 
     },
     runtime: () => ({
       preflight: async images => { events.push('preflight'); assert.deepEqual(images, selected); },
-      apply: async key => { events.push('apply'); assert.match(key, /^sk-ams-admin-/); },
+      apply: async (key, { createAdminKey }) => { events.push('apply'); assert.equal(key, undefined); assert.match(await createAdminKey(), /^sk-ams-admin-/); },
       login: async () => assert.fail('not requested'),
     }),
   });
@@ -172,11 +176,10 @@ test('image preparation failure preserves installed configuration and skips pref
   assert.equal(await readFile(join(dir, '.env'), 'utf8'), before);
   assert.equal(await readFile(join(dir, '.ams/images.json'), 'utf8'), images);
 });
-test('saved stack with existing containers applies without asking for an administrator key',async t=>{
+test('saved stack with an active administrator applies without generating or asking for a key',async t=>{
   const dir=await fixture(t); await writeFile(join(dir,'.env'),encodeEnv(settings));
-  const existingAdmin=generateKey('admin');
-  const ui=interaction({directory:dir,'generate:admin':'manual',admin:existingAdmin}); let key;
-  await setupServer(ui,{runtime:()=>({hasApplicationContainers:async()=>true,preflight:async()=>{},apply:async value=>{key=value;},login:async()=>assert.fail('not requested'),status:async()=>assert.fail('setup must apply')})});
+  const ui=interaction({directory:dir}); let key;
+  await setupServer(ui,{runtime:()=>({preflight:async()=>{},apply:async (value,{createAdminKey})=>{key=value; assert.equal(typeof createAdminKey,'function');},login:async()=>assert.fail('not requested'),status:async()=>assert.fail('setup must apply')})});
   assert.equal(key,undefined); assert.deepEqual(ui.handoffs,[]); assert.ok(!ui.asked.includes('admin')); assert.ok(!ui.asked.includes('generate:admin'));
   assert.ok(!ui.asked.includes('server-action'));
   assert.equal((await readEnv(join(dir,'.env'))).CORE_API_KEY,settings.CORE_API_KEY);
@@ -202,7 +205,7 @@ test('standalone CLIProxyAPI asks only its settings and deploys its required sub
     preflight: async (_manifest, env) => assert.equal(env.AMS_SERVICES, 'cli-proxy-api'),
     apply: async (key, opts) => { applied = opts; assert.equal(key, undefined); }, login: async () => assert.fail('not requested'), status: async () => '',
   }) });
-  assert.deepEqual(applied, { allowPending: false });
+  assert.deepEqual(applied, { allowPending: false, createAdminKey: undefined });
   assert.ok(!ui.asked.includes('server-action'));
   assert.equal(ui.handoffs.length, 0);
   for (const name of ['CORE_API_KEY','LLM_API_KEY','LLM_BASE_URL','MEMORY_LLM_MODEL','KNOWLEDGE_LLM_MODEL','PANEL_PUBLIC_URL','KNOWLEDGE_PUBLIC_URL','generate:admin']) assert.ok(!ui.asked.includes(name), name);
@@ -215,12 +218,14 @@ test('saved local CLIProxyAPI can log in after installation without an action me
   const dir = await fixture(t);
   const env = await serverQuestions(interaction(), {}, ['cli-proxy-api']);
   await writeFile(join(dir, '.env'), encodeEnv(env));
-  const ui = interaction({ directory: dir,  login: true });
+  const ui = interaction({ directory: dir,  login: 'codex' });
   const events = [];
+  let authorized = false;
   await setupServer(ui, { runtime: () => ({
+    hasProviderAuthorization: async () => authorized,
     preflight: async () => { events.push('preflight'); },
     apply: async key => { assert.equal(key, undefined); events.push('apply'); },
-    login: async () => { events.push('login'); },
+    login: async () => { authorized = true; events.push('login'); },
     status: async () => assert.fail('setup must apply'),
   }) });
   assert.deepEqual(events, ['preflight', 'apply', 'login']);
@@ -299,6 +304,63 @@ test('unavailable or empty model discovery falls back once to the original model
   }
 });
 
+test('API access rejection retries the key without keeping the rejected value or falling back to manual models', async () => {
+  for (const saved of [false, true]) {
+    const calls = [];
+    const ui = interaction({ 'LLM_API_KEY:retry:0': settings.LLM_API_KEY, 'LLM_API_KEY:retry:1': 'corrected-key', MEMORY_LLM_MODEL: 'model:0', KNOWLEDGE_LLM_MODEL: 'model:0' });
+    const env = await navigate(ui, questions => serverQuestions(questions, saved ? settings : {}, serviceNames, {
+      listModels: async (url, key) => {
+        calls.push([url, key]);
+        if (key !== 'corrected-key') throw new ModelAccessError(calls.length === 1 ? 401 : 403);
+        return ['available-model'];
+      },
+    }));
+    assert.deepEqual(calls.map(call => call[1]), [settings.LLM_API_KEY, settings.LLM_API_KEY, 'corrected-key']);
+    assert.equal(env.LLM_API_KEY, 'corrected-key');
+    assert.equal(env.MEMORY_LLM_MODEL, 'available-model');
+    assert.equal(env.KNOWLEDGE_LLM_MODEL, 'available-model');
+    for (const q of ui.questions.filter(q => q.id.startsWith('LLM_API_KEY:retry:'))) {
+      assert.equal(q.secret, true); assert.equal(q.initial, undefined);
+      assert.doesNotMatch(q.message, /keep/); assert.ok(q.validate(''));
+    }
+    assert.equal(ui.asked.filter(id => id === 'LLM_BASE_URL').length, 1);
+    assert.doesNotMatch(ui.notes.join('\n'), /Enter the model names manually/);
+    assert.ok(!ui.notes.join('\n').includes(settings.LLM_API_KEY));
+  }
+});
+
+test('cancelling API key retry exits setup instead of falling back to manual models', async () => {
+  const ui = interaction(); const text = ui.text;
+  ui.text = async q => { if (q.id.startsWith('LLM_API_KEY:retry:')) throw new Cancelled(); return text(q); };
+  await assert.rejects(serverQuestions(ui, {}, ['core'], { listModels: async () => { throw new ModelAccessError(401); } }), Cancelled);
+  assert.ok(!ui.asked.includes('MEMORY_LLM_MODEL'));
+});
+
+test('Escape after a corrected key preserves that correction and cached models', async () => {
+  const ui = interaction(); const text = ui.text; const select = ui.select;
+  let keyVisits = 0, modelVisits = 0, discoveries = 0;
+  ui.text = async q => {
+    if (q.id.startsWith('LLM_API_KEY:retry:')) {
+      if (keyVisits++ === 0) return 'corrected-key';
+      assert.match(q.message, /Enter to keep the previous value/);
+      return '';
+    }
+    return text(q);
+  };
+  ui.select = async (...args) => {
+    if (args[0] === 'MEMORY_LLM_MODEL' && modelVisits++ === 0) throw new Back();
+    return select(...args);
+  };
+  const env = await navigate(ui, questions => serverQuestions(questions, {}, ['core'], { listModels: async (_url, key) => {
+    discoveries++;
+    if (key !== 'corrected-key') throw new ModelAccessError(401);
+    return ['available-model'];
+  } }));
+  assert.equal(env.LLM_API_KEY, 'corrected-key');
+  assert.equal(keyVisits, 2); assert.equal(discoveries, 2);
+  assert.equal(ui.asked.filter(id => id === 'LLM_BASE_URL').length, 1);
+});
+
 test('saved models outside the list remain selected and manual entry stays available', async () => {
   const saved = interaction();
   const kept = await serverQuestions(saved, { ...settings, AMS_SERVICES: 'core', MODEL_MODE: 'disabled', KNOWLEDGE_MODE: 'disabled', PANEL_MODE: 'disabled', PROXY_MODE: 'disabled' }, ['core'], { listModels: async () => ['listed-model'] });
@@ -367,10 +429,10 @@ test('configuration snapshot preserves previous applied inputs after desired set
       assert.equal((await readEnv(join(dir,'.env'))).LOG_LEVEL,'warn');
       assert.equal(await readFile(join(dir,'.ams/images.json'),'utf8'),oldImages);
     },
-    apply: async () => { events.push('apply'); assert.equal((await readEnv(join(dir,'.env'))).LOG_LEVEL,'warn'); },
+    apply: async (_key, { createAdminKey }) => { events.push('apply'); await createAdminKey(); assert.equal((await readEnv(join(dir,'.env'))).LOG_LEVEL,'warn'); },
     login: async () => assert.fail('not requested'), status: async () => '',
   }) });
-  assert.deepEqual(events,['handoff','preflight','snapshot','apply']);
+  assert.deepEqual(events,['preflight','snapshot','apply','handoff']);
   assert.equal(await readFile(join(dir,'.ams/previous-settings/.env'),'utf8'), before);
 });
 
@@ -399,15 +461,16 @@ test('post-apply Escape cannot repeat configuration saves, image preparation or 
   let coreKey, adminKey;
   const shownKeys = [];
   ui.handoff = async key => { shownKeys.push(key); };
-  const confirm = ui.confirm;
-  ui.confirm = async (...args) => { if (args[0] === 'login') throw new Back(); return confirm(...args); };
+  const select = ui.select;
+  ui.select = async (...args) => { if (args[0] === 'login') throw new Back(); return select(...args); };
   await assert.rejects(run(ui, { apply: async () => assert.fail('Configure selected'), configure: questions => setupServer(questions, {
     listModels: async () => { discovery++; return []; },
     prepareImages: async () => { prepared++; return structuredClone(manifest); },
     runtime: () => ({
       preflight: async (_images, env) => { preflight++; coreKey = env.CORE_API_KEY; },
       snapshot: async () => { snapshots++; },
-      apply: async key => { applied++; adminKey = key; },
+      apply: async (_key, { createAdminKey }) => { applied++; adminKey = await createAdminKey(); },
+      hasProviderAuthorization: async () => false,
       login: async () => assert.fail('login cancelled'),
     }),
   }) }), Cancelled);

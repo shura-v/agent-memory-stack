@@ -1,6 +1,6 @@
 # Delivery validation
 
-Updated: 2026-09-16. Tests use synthetic credentials and isolated data. The user's existing `tdai-proxy` is outside the test projects.
+Updated: 2026-09-19. Tests use synthetic credentials and isolated data. The user's existing stack is outside the test projects.
 
 ## Acceptance scope
 
@@ -9,6 +9,92 @@ The sole acceptance criterion for the two archived delivery changes is **require
 Comprehensive agent, MCP, provider, memory/Wiki, authorization, and full recovery validation is deferred until Supergateway and the remaining integrations are implemented. These checks are outside the archived changes' completion criteria. Existing test results below remain historical evidence; unchecked functional acceptance has not been converted into a pass.
 
 ## Current CLI verification
+
+### MCP lifecycle methods and selected-image exports — 2026-09-19
+
+Missing upstream sessions now return HTTP 404 for POST, GET and DELETE. The gateway recognizes Supergateway's method-specific JSON or plain-text error and removes the stale local entry; unrelated 400 responses retain their status and bytes. Real Supergateway regressions cover session loss and successful reinitialization for all three methods.
+
+Configured exports select the images required by the saved `.env`, including helper images, before checking revisions. Retained inactive image records stay unchanged locally and cannot block export after a TDAI update. Export without deployment settings retains the full-manifest contract. A real-tar/simulated-engine regression exports updated Core plus runtime with stale Panel retained locally, imports the bundle and reuses its images without rebuilding.
+
+`npm test`: **282 passed, 15 opt-in skipped, 0 failed**. TypeScript build and all **22 gateway tests** passed. Container build/start acceptance was not rerun; no existing installation was changed.
+
+### Lost upstream MCP sessions signal reinitialization — 2026-09-19
+
+The gateway translates the pinned Supergateway's specific missing-session HTTP 400 response into HTTP 404 and removes its local session entry. Other 400 responses retain their status and bytes; inspection buffers at most 64 KiB before switching to passthrough streaming.
+
+`npm test`: **276 passed, 15 opt-in skipped, 0 failed**. All **18 gateway tests passed**. A real Supergateway regression invalidates a session with an unsupported protocol version, verifies 404 on the subsequent valid request, and successfully initializes a new session and lists tools. Container build/start acceptance was not rerun; these tests use local subprocesses and synthetic credentials.
+
+### Failed MCP initialization releases its worker slot — 2026-09-19
+
+Unused failed-initialization workers are removed from the pool before process shutdown is awaited. A stale lease cannot remove a replacement worker. The real pinned Supergateway regression now verifies an initial HTTP 415 followed immediately by a successful initialization and tool listing, without an intermediate HTTP 503.
+
+`npm test`: **274 passed, 15 opt-in skipped, 0 failed**. All **16 gateway tests passed**, including pool capacity release during pending shutdown and preservation of established sessions. Container build/start acceptance was not rerun for this fix; the real Supergateway regression runs as a local subprocess with synthetic credentials.
+
+### Review fixes: initialization recovery, image bundles and provider rollback — 2026-09-19
+
+Interrupted administrator initialization resumes with the existing active credential and creates missing defaults. An interrupted reinitialization also marks old Core completion as incomplete while preserving the installed-service inventory. TDAI image bundles include checksum-protected source selection, verify it against image revision labels and restore it during import. Successful provider authorization updates the applied-input baseline; failed authorization keeps the requested provider for retry without advancing that baseline.
+
+`npm test`: **271 passed, 15 opt-in skipped, 0 failed**. Regressions cover partial initialization and retries, imported-image reuse without a network/build fallback, source metadata corruption and revision mismatches, and rollback after switching providers. Bundle regressions use real tar archives with a simulated container engine.
+
+The isolated Podman runtime smoke also **passed in 292 seconds**: changed MCP/runtime images built, selected containers started, fresh initialization and repeat Apply succeeded, and cold credential restoration passed. The fixture used synthetic credentials in `/private/tmp/ams-runtime-y7ICUN`; its test containers were removed. The user's stack was not restarted. Real provider login, remote delivery, external agents and Wiki semantics were not tested by this run.
+
+### Connection details grouped by service — 2026-09-19
+
+Connection details now pair each service's address/port with its matching credentials in the same plain-text block. Panel includes administrator login keys; MemoryProxy and MCP each include user keys. Core, CLIProxyAPI, internal LLM and saved remote connections include their own credentials and clearly identify private or inactive addresses. User-key values are read once and reused across blocks.
+
+TypeScript build and **30 focused tests passed**; after completing the published CLIProxyAPI URL, all **7 presenter tests passed** again. Coverage includes adjacent credential/address pairing, administrator roles, no duplicate key reads, retained remote credentials, unavailable Core and explicit host-port exposure. This is a presentation change; containers were not restarted and container acceptance was not rerun.
+
+### All-key connection display — 2026-09-19
+
+The explicit **Show connection details** screen now prints all configured `.env` secret fields, including retained remote credentials, and every active, unexpired local Core user key, including administrator keys. There is no key-selection prompt. Each value has a label and its own copyable line; one unavailable Core key does not prevent displaying the remaining keys, and Core failures retain the `.env` output. Apply/update still print only a recommendation to open the screen.
+
+**257 tests passed, 15 opt-in tests skipped, 0 failed.** Presenter regressions cover all-key output, inactive-but-saved remote credentials, administrator labeling, per-key failure continuation, unavailable Core, and unchanged configuration bytes. The runtime reader and container lifecycle are unchanged; container acceptance was not rerun for this presentation change. The earlier build/start evidence below remains historical.
+
+### Explicit connection details — 2026-09-19
+
+`ams` now includes **Show connection details**. A real TTY invocation showed all three menu items, kept Configure stack selected, and cancelled without runtime effects. Successful Apply/update ends with a recommendation to open this screen; existing keys are not printed automatically. The screen lists saved listener settings and reads the selected existing user key through captured exec on the verified local Core using read-only SQLite. It does not create, rotate, or persist credentials.
+
+**257 standard tests passed, 15 opt-in tests skipped, 0 failed.** The explicit Podman runtime smoke also passed (169 seconds): changed MCP/runtime images built, selected containers started, initialization completed, metadata listing omitted the full key, and explicit key lookup matched the generated synthetic administrator key. The same run passed repeat application and cold credential restoration. Image identities, platform, runtime and selected services are recorded in [connection-details-start.json](docs/validation/connection-details-start.json). Temporary test containers were removed; the user's stack was not restarted. Real provider login, external agents, Wiki and VPS/Caddy were outside this run.
+
+### Review fixes: MCP session lifecycle and administrator handoff — 2026-09-19
+
+The gateway preserves established sessions and concurrent initializations when another initialization fails. Failed initialization only stops an otherwise unused worker. JSON-RPC initialization IDs are validated with the SDK request schema. A regression using the pinned real Supergateway verifies that a second initialization returning HTTP 415 does not prevent the first session from calling `tools/list` and closing normally.
+
+`npm test`: **242 passed, 15 opt-in skipped, 0 failed**. Both corrected smoke fixtures were also run explicitly on isolated Podman Compose installations with synthetic credentials: **runtime lifecycle/cold credential restore passed** (222 seconds), and **synthetic model instructions/L0 persistence/Panel access/SSE cancellation passed** (104 seconds). The fixtures capture the generated administrator key from setup and use it for authenticated requests. They configure test network settings through `.env`, use resolved local ports, and stub account authorization only; Core initialization uses the production runtime.
+
+Required images were built and the temporary stacks started successfully. These runs used no real model provider or account login and did not restart the user's existing stack. They do not certify real agent, Wiki, VPS/Caddy, or external model-provider behavior.
+
+### Server MCP gateway — completed 2026-09-16
+
+Node.js 24.18.1: **202 tests passed**, **15 opt-in tests skipped**, **0 failed**.
+Coverage includes all 63 service subsets, protected tool forwarding, current-user
+verification, credential-bound sessions, cancellation, bounded worker/session
+lifecycle, and Core/Knowledge identity pairing. These are focused implementation
+checks, not comprehensive agent or authorization acceptance.
+
+**Build-and-start acceptance passed** on Podman **6.1.1**, podman-compose
+**1.6.0**, **linux/arm64**. An isolated MCP-only Compose project started the new
+MCP image and a new protected-access helper using the rebuilt runtime image.
+Both long-running containers were **running/healthy** at **00:59:06 UTC**;
+the one-shot configuration job exited **0**. Only MCP published a host listener,
+at **127.0.0.1:8425**. Core/Knowledge pairing reported no pending dependencies.
+The existing installation supplied Core and Knowledge as read-only dependencies;
+this MCP-only selection required no Core bootstrap, administrator input, provider
+login, or inference. Existing application containers were not restarted.
+
+| Image | Content identity |
+| --- | --- |
+| MCP | `sha256:b3cada558463ec79b32c4e1c97b6094690897110f3b4b5ad1c0468e59217c8ea` |
+| Runtime | `sha256:5999aec86601716147729e70a067fb1213832762e0c34611b43cb71297da379b` |
+
+The MCP image locks Supergateway 3.4.3 and MCP SDK 1.30.0. Its build applied the
+exact-match container-loopback and direct-adapter-spawn patches successfully.
+The sanitized observation is in `artifacts/mcp-start.json`. Test containers and
+temporary credential copies were removed after recording startup; the original
+installation's explicit service selection was preserved. This run did not certify
+a fresh six-service installation, Docker/AMD64 execution, VPS/Caddy forwarding,
+real agent registration, Wiki search, concurrent-user isolation under load, or
+recovery. Those remain part of the later comprehensive validation phase.
 
 ### Apply menu and command — completed 2026-09-16
 

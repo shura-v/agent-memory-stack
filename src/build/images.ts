@@ -2,10 +2,10 @@ import { DeploymentError } from "../runtime/errors.js";
 import { execFileSync, spawn } from 'node:child_process';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { buildContext, fetchSources, packageRoot } from './sources.js';
+import { buildContext, fetchSources, loadSourceLock, packageRoot } from './sources.js';
 import { buildFingerprint, buildFingerprintLabel, contextPackageJson } from './fingerprint.js';
 
-export const imageServices = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'runtime'] as const;
+export const imageServices = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'mcp', 'runtime'] as const;
 export type ImageService = typeof imageServices[number];
 export type ContainerRuntime = 'docker' | 'podman';
 export type ImagePlatform = 'linux/amd64' | 'linux/arm64';
@@ -20,7 +20,7 @@ export interface BuildOptions {
   manifest?: ImageManifest;
   persist?: boolean;
 }
-const variables: Record<ImageService, string> = { core: 'CORE_IMAGE', knowledge: 'KNOWLEDGE_IMAGE', panel: 'PANEL_IMAGE', 'memory-proxy': 'PROXY_IMAGE', 'cli-proxy-api': 'CLIPROXY_IMAGE', runtime: 'RUNTIME_IMAGE' };
+const variables: Record<ImageService, string> = { core: 'CORE_IMAGE', knowledge: 'KNOWLEDGE_IMAGE', panel: 'PANEL_IMAGE', 'memory-proxy': 'PROXY_IMAGE', 'cli-proxy-api': 'CLIPROXY_IMAGE', mcp: 'MCP_IMAGE', runtime: 'RUNTIME_IMAGE' };
 
 export function validateImageManifest(value: unknown, requireComplete = true, platform?: ImagePlatform): ImageManifest {
   const manifest = value as ImageManifest;
@@ -61,14 +61,14 @@ export async function writeImageManifest(projectDir: string, manifest: ImageMani
 export async function prepareBuildContext(projectDir: string): Promise<string> {
   const context = buildContext(projectDir);
   await mkdir(context, { recursive: true });
-  for (const resource of ['docker', 'dist/runtime', 'dist/config', 'dist/build', 'dist/deployment']) {
+  for (const resource of ['deploy', 'dist/runtime', 'dist/config', 'dist/build', 'dist/deployment']) {
     await rm(resolve(context, resource), { recursive: true, force: true });
     await cp(resolve(packageRoot, resource), resolve(context, resource), {
       recursive: true, filter: source => !resource.startsWith('dist/') || !source.endsWith('.map'),
     });
   }
   await writeFile(resolve(context, 'package.json'), contextPackageJson);
-  await writeFile(resolve(context, '.dockerignore'), '**\n!docker/\n!docker/**\n!dist/\n!dist/runtime/\n!dist/runtime/**\n!dist/config/\n!dist/config/**\n!dist/build/\n!dist/build/**\n!dist/deployment/\n!dist/deployment/**\n!package.json\n!.cache/\n!.cache/upstream/\n!.cache/upstream/tencent/\n!.cache/upstream/tencent/**\n!.cache/upstream/cliproxy/\n!.cache/upstream/cliproxy/**\n**/node_modules\n**/.git\n**/.env\n**/.env.*\n**/.admin-key*\n**/config.local.*\n');
+  await writeFile(resolve(context, '.dockerignore'), '**\n!deploy/\n!deploy/**\n!dist/\n!dist/runtime/\n!dist/runtime/**\n!dist/config/\n!dist/config/**\n!dist/build/\n!dist/build/**\n!dist/deployment/\n!dist/deployment/**\n!package.json\n!.cache/\n!.cache/upstream/\n!.cache/upstream/tencent/\n!.cache/upstream/tencent/**\n!.cache/upstream/cliproxy/\n!.cache/upstream/cliproxy/**\n**/node_modules\n**/.git\n**/.env\n**/.env.*\n**/.admin-key*\n**/config.local.*\n');
   return context;
 }
 
@@ -90,13 +90,14 @@ export async function buildImages(options: BuildOptions): Promise<ImageManifest>
   }
   const context = await prepareBuildContext(projectDir);
   await fetchSources(projectDir);
+  const sourceLock = await loadSourceLock(projectDir);
   for (const service of selected) {
-    const nodeService = !['cli-proxy-api', 'runtime'].includes(service);
+    const nodeService = !['cli-proxy-api', 'runtime', 'mcp'].includes(service);
     const tag = `agent-memory-stack/${service}:local`;
-    const fingerprint = await buildFingerprint(service);
-    const args = ['build', '--file', `docker/${nodeService ? 'node' : service}.Dockerfile`, '--tag', tag,
+    const fingerprint = await buildFingerprint(service, undefined, projectDir);
+    const args = ['build', '--file', `deploy/${nodeService ? 'node' : service}.Dockerfile`, '--tag', tag,
       '--label', `${buildFingerprintLabel}=${fingerprint}`];
-    if (nodeService) args.push('--target', service);
+    if (nodeService) args.push('--target', service, '--build-arg', `TDAI_REVISION=${sourceLock.sources.tencent.revision}`);
     if (platform) args.push('--platform', platform);
     args.push('.');
     console.log(`Building ${service}${platform ? ` (${platform})` : ''}`);

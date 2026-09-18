@@ -15,7 +15,7 @@ export async function snapshotSettings(directory: string): Promise<void> {
   };
   await makeDirectory(join(directory, '.ams'));
   await makeDirectory(destination);
-  const paths = ['.env', 'compose.yaml', '.ams/images.json', '.ams/compose.env', '.ams/runtime.json', '.ams/applied.json', '.ams/network.json'];
+  const paths = ['.env', 'compose.yaml', '.ams/images.json', '.ams/compose.env', '.ams/runtime.json', '.ams/applied.json', '.ams/network.json', '.ams/tdai-source.json'];
   try {
     const generated = join(directory, 'generated');
     if (!(await lstat(generated)).isDirectory() || (await lstat(generated)).isSymbolicLink()) throw new Error('Generated configuration must be a directory');

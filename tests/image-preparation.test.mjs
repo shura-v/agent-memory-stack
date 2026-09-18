@@ -167,3 +167,36 @@ test('old runtime images rebuild despite valid immutable identities; current imp
     run: imported.run, build: async () => assert.fail('current OCI labels survive export/import; no download or rebuild'),
   }), metadata);
 });
+
+test('changing an installation TDAI revision rebuilds its four images while preserving other images', async t => {
+  const services = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'mcp', 'runtime'];
+  const images = Object.fromEntries(services.map((service, index) => [service, identity(String(index + 1))]));
+  const projectDir = await directory(t, manifest(images));
+  const writePin = async digit => {
+    const revision = digit.repeat(40);
+    await writeFile(join(projectDir, '.ams/tdai-source.json'), JSON.stringify({
+      revision, url: `https://codeload.github.com/TencentCloud/TencentDB-Agent-Memory/tar.gz/${revision}`, sha256: digit.repeat(64),
+    }));
+  };
+  await writePin('a');
+  const fingerprints = Object.fromEntries(await Promise.all(services.map(async service => [
+    images[service].id, await buildFingerprint(service, undefined, projectDir),
+  ])));
+  const fake = engine(Object.fromEntries(Object.values(images).map(image => [image.id, image])), { fingerprints });
+  await prepareImages({ projectDir, runtime: 'docker', services }, {
+    run: fake.run, build: async () => assert.fail('matching installation pin must reuse images'),
+  });
+  await writePin('b');
+  let builds = 0;
+  const result = await prepareImages({ projectDir, runtime: 'docker', services }, {
+    run: fake.run,
+    build: async options => {
+      builds++;
+      assert.deepEqual(options.services, ['core', 'knowledge', 'panel', 'memory-proxy']);
+      assert.equal(options.projectDir, projectDir);
+      return options.manifest;
+    },
+  });
+  assert.equal(builds, 1);
+  for (const service of ['cli-proxy-api', 'mcp', 'runtime']) assert.deepEqual(result.images[service], images[service]);
+});

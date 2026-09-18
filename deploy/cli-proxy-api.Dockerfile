@@ -7,7 +7,7 @@ COPY .cache/upstream/cliproxy/ ./
 RUN GOMAXPROCS=2 GOMEMLIMIT=512MiB go build -p 1 -mod=readonly -trimpath -buildvcs=false -ldflags="-s -w -X main.Version=ams-pinned -X main.Commit=7bbfeaf8a7acf2cd5a834dcb0842539fe6aabc2b -X main.BuildDate=2026-09-15" -o /out/cli-proxy-api ./cmd/server/
 
 FROM docker.io/library/debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
-COPY docker/debian.sources /etc/apt/sources.list.d/debian.sources
+COPY deploy/debian.sources /etc/apt/sources.list.d/debian.sources
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata tini libstdc++6 && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid 10001 --create-home app && mkdir -p /app /data/auth && chown -R app:app /app /data
 COPY --from=build /out/cli-proxy-api /app/cli-proxy-api

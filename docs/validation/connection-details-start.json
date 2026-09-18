@@ -1,0 +1,35 @@
+{
+  "date": "2026-09-19",
+  "runtime": "podman compose",
+  "platform": "linux/arm64",
+  "images": {
+    "core": "sha256:aaefb1d84807d93a46d68494b10091c97daaade1d16c42242ecb48ab71c5e411",
+    "knowledge": "sha256:019f245f5a8305fe52e6a94ee793f57c8f7c38cd5f466f671c70d343b47137d7",
+    "panel": "sha256:e6deafd9b6cdd119906b9675fc29d2680c61ef1b827a22851d8eaab6625e1294",
+    "memory-proxy": "sha256:07f33d6d4d857e5a5855d214cab5671395b7dbd9079811fbfadd38a20f206683",
+    "cli-proxy-api": "sha256:b8d85909aa4cffa35b2d1ae63a0443bc84c6869ae721f36a49fe1e91307c5527",
+    "mcp": "sha256:6f4d6a3f8b78b299d1d4ee656e9984b0ceabc18b7f70020fc5aad3606bd83171",
+    "runtime": "sha256:ea9491da4d8aa674eb671a17de602834fa068f0ea9d0bc2e79707149d5d460e9"
+  },
+  "services": [
+    "core",
+    "knowledge",
+    "panel",
+    "memory-proxy",
+    "cli-proxy-api",
+    "mcp",
+    "config",
+    "bootstrap",
+    "access",
+    "knowledge-service"
+  ],
+  "result": "passed",
+  "checks": [
+    "Required images available; changed runtime and MCP images rebuilt",
+    "Selected containers started and passed runtime readiness",
+    "Configuration and administrator initialization completed",
+    "Read-only connection key lookup matched the generated synthetic administrator key",
+    "Repeat application and cold credential restore passed"
+  ],
+  "scope": "Isolated synthetic runtime smoke; no real provider login, inference, or existing user installation changes"
+}

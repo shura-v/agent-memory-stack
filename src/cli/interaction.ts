@@ -37,10 +37,16 @@ export function createInteraction(
       return await answer(() => prompts.multiselect<string>({ message, options, initialValues: initial, required: false })) as typeof initial;
     },
     note(message, title) { prompts.note(message, title); },
+    print(message) { output.write(`${message}\n`); },
     async handoff(key) {
       prompts.note('Copy the key below now; ams will not save a separate copy.', 'Administrator key');
       output.write(`${key}\n\n`);
-      if (!await answer(() => prompts.confirm({ message: 'I have saved the key. Continue initialization?', initialValue: false }))) throw new Cancelled();
+      await answer(() => prompts.select({
+        message: 'I have saved the key.',
+        options: [{ value: 'ok', label: 'OK', hint: 'Press Enter to continue' }],
+        initialValue: 'ok',
+        showInstructions: false,
+      }));
     },
   };
 }

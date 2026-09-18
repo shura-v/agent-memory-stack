@@ -1,0 +1,10 @@
+{
+  "name": "ams-mcp-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "supergateway": "3.4.3"
+  }
+}

@@ -3,14 +3,9 @@ import { fields, generateKey, validateEnv, validateField } from '../config/setti
 import { catalog, resolveDeployment, selectionFromEnv } from '../deployment/model.js';
 import type { Service } from '../deployment/model.js';
 import { remember } from './interaction.js';
-import { discoverModels } from './model-discovery.js';
+import { discoverModels, ModelAccessError } from './model-discovery.js';
 import type { ModelDiscovery } from './model-discovery.js';
 import { accountProviders } from '../config/providers.js';
-
-export const keyOptions = [
-  { value: 'generate', label: 'Generate automatically' },
-  { value: 'manual', label: 'Enter manually' },
-];
 
 export async function selectServices(ui: Interaction, existing: Record<string, string>): Promise<Service[]> {
   const plan = resolveDeployment(existing, { requireConnections: false });
@@ -29,7 +24,7 @@ export async function serverQuestions(ui: Interaction, existing: Record<string, 
   resolveDeployment(existing, { requireConnections: false });
   const values: Record<string, string> = { ...existing, AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: services.join(',') };
   const plan = resolveDeployment(values, { requireConnections: false });
-  ui.note('Panel and MemoryProxy publish localhost ports automatically. Apply keeps saved ports when available and chooses free ports when needed. Other interfaces stay private unless explicitly enabled in .env. Configure external domains and advanced connections in .env; MCP will gain its own entry point when implemented.', 'Local connections');
+  ui.note('Panel, MemoryProxy, and MCP publish localhost ports automatically. Apply keeps saved ports when available and chooses free ports when needed. Other interfaces stay private unless explicitly enabled in .env. Configure external domains and advanced connections in .env.', 'Local connections');
   let models: string[] | undefined;
   for (const field of fields.filter(field => plan.fields.includes(field.name) && setupFields.has(field.name))) {
     const previous = existing[field.name];
@@ -44,9 +39,18 @@ export async function serverQuestions(ui: Interaction, existing: Record<string, 
     }
     if (field.name === 'MEMORY_LLM_MODEL' || field.name === 'KNOWLEDGE_LLM_MODEL') {
       if (models === undefined) {
-        ui.note('Loading available models from your API (up to 5 seconds).', 'Models');
-        try { models = await remember(ui, 'provider-models', () => listModels(values.LLM_BASE_URL, values.LLM_API_KEY), [values.LLM_BASE_URL, values.LLM_API_KEY]); }
-        catch { models = []; }
+        let attempt = 0;
+        while (models === undefined) {
+          ui.note('Loading available models from your API (up to 5 seconds).', 'Models');
+          try { models = await remember(ui, `provider-models:${attempt}`, () => listModels(values.LLM_BASE_URL, values.LLM_API_KEY), [values.LLM_BASE_URL, values.LLM_API_KEY]); }
+          catch (error) {
+            if (!(error instanceof ModelAccessError)) { models = []; break; }
+            ui.note(`${error.message} Enter the key again, or use Esc to edit earlier answers.`, 'API access');
+            const keyField = fields.find(item => item.name === 'LLM_API_KEY')!;
+            values.LLM_API_KEY = await ui.text({ id: `LLM_API_KEY:retry:${attempt++}`, message: keyField.label,
+              secret: true, validate: value => validateField(keyField, value) });
+          }
+        }
         models = models.filter(model => !validateField(field, model));
         if (!models.length) ui.note('No model list is available. Enter the model names manually.', 'Models');
       }

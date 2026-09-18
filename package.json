@@ -21,7 +21,9 @@
     "yaml": "2.9.1"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@types/node": "24.13.4",
+    "supergateway": "3.4.3",
     "typescript": "7.0.2"
   },
   "description": "Interactive setup and container delivery for TencentDB Agent Memory",
@@ -33,12 +35,13 @@
     "dist/**/*.d.ts",
     "server/compose.yaml",
     "server/.env.example",
-    "docker/**/*.Dockerfile",
-    "docker/debian.sources",
-    "docker/locks/**",
+    "deploy/**/*.Dockerfile",
+    "deploy/debian.sources",
+    "deploy/locks/**",
     "upstream.lock.json",
     "THIRD_PARTY_NOTICES.md",
     "README.md",
+    "docs/updating-tdai.md",
     "DEFAULTS-AUDIT.md",
     "patches/ams-access.ts",
     "patches/ams-features.tsx",

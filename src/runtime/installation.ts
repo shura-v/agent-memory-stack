@@ -41,7 +41,7 @@ export async function detectExistingInstallation(run: Runner = runProcess): Prom
       }
       groups.set(project, group);
     }
-    for (const [project, group] of groups) if (serviceNames.every(service => group.services.has(service))) {
+    for (const [project, group] of groups) if (serviceNames.filter(service => service !== 'mcp').every(service => group.services.has(service))) {
       return { engine, project, ...(group.directories.size === 1 ? { directory: [...group.directories][0] } : {}) };
     }
     return undefined;

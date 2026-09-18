@@ -67,6 +67,9 @@ export async function navigate<T>(ui: Interaction, workflow: (questions: Interac
     note(message, title) {
       if (committed || cursor >= replayUntil) ui.note(message, title);
     },
+    print(message) {
+      if (committed || cursor >= replayUntil) ui.print(message);
+    },
     memo<V>(id: string, create: () => V, dependencies: readonly unknown[] = []): V {
       if (committed) return create();
       const signature = JSON.stringify(dependencies);

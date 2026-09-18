@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { discoverModels } from '../dist/setup/model-discovery.js';
+import { discoverModels, ModelAccessError } from '../dist/setup/model-discovery.js';
 
 async function server(t, handler) {
   const server = createServer(handler);
@@ -36,10 +36,24 @@ test('redirect discovery never follows or forwards credentials to its destinatio
 });
 
 test('failed, malformed, and empty discovery returns manual-entry fallback', async () => {
-  for (const [status, body] of [[401, '{"data":[{"id":"hidden"}]}'], [500, 'failure'], [200, 'not JSON'], [200, '{}'], [200, '{"data":{}}'], [200, '{"data":[]}']]) {
+  for (const [status, body] of [[404, 'not supported'], [405, 'not supported'], [500, 'failure'], [200, 'not JSON'], [200, '{}'], [200, '{"data":{}}'], [200, '{"data":[]}']]) {
     assert.deepEqual(await discoverModels('https://provider.invalid/v1', 'synthetic-key', async () => new Response(body, { status })), []);
   }
   assert.deepEqual(await discoverModels('https://provider.invalid/v1', 'synthetic-key', async () => { throw new Error('private network details'); }), []);
+});
+
+test('access rejection is distinct from unavailable discovery and does not disclose response details', async () => {
+  for (const status of [401, 403]) {
+    let cancelled = false;
+    const body = new ReadableStream({ cancel() { cancelled = true; } });
+    await assert.rejects(discoverModels('https://provider.invalid/v1', 'private-key', async () => new Response(body, {status})), error => {
+      assert.ok(error instanceof ModelAccessError);
+      assert.equal(error.status, status);
+      assert.doesNotMatch(error.message, /private-key/);
+      return true;
+    });
+    assert.equal(cancelled, true);
+  }
 });
 
 test('model IDs are deduplicated and terminal control characters are rejected', async () => {

@@ -2,25 +2,28 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { ImageService } from './images.js';
-import { packageRoot } from './sources.js';
+import { loadSourceLock, packageRoot } from './sources.js';
 
 export const buildFingerprintLabel = 'io.agent-memory-stack.build-fingerprint';
 export const contextPackageJson = '{"type":"module"}\n';
 
-/** Hash packaged build inputs, not installation files, clocks, or checkout paths. */
-export async function buildFingerprint(service: ImageService, root = packageRoot): Promise<string> {
+/** Hash packaged inputs and the effective TDAI source, never secrets or paths. */
+export async function buildFingerprint(service: ImageService, root = packageRoot, projectDir?: string): Promise<string> {
   let inputs: string[];
   if (service === 'runtime') {
-    inputs = ['docker/runtime.Dockerfile', 'dist/runtime', 'dist/config', 'dist/deployment'];
+    inputs = ['deploy/runtime.Dockerfile', 'dist/runtime', 'dist/config', 'dist/deployment'];
+  } else if (service === 'mcp') {
+    inputs = ['deploy/mcp.Dockerfile', 'deploy/debian.sources', 'deploy/locks/mcp',
+      'dist/runtime', 'dist/config', 'dist/deployment'];
   } else if (service === 'cli-proxy-api') {
-    inputs = ['docker/cli-proxy-api.Dockerfile', 'docker/debian.sources', 'upstream.lock.json'];
+    inputs = ['deploy/cli-proxy-api.Dockerfile', 'deploy/debian.sources', 'upstream.lock.json'];
   } else {
     const lock = service === 'memory-proxy' ? 'proxy' : service;
-    inputs = ['docker/node.Dockerfile', 'docker/debian.sources', `docker/locks/${lock}`,
+    inputs = ['deploy/node.Dockerfile', 'deploy/debian.sources', `deploy/locks/${lock}`,
       'upstream.lock.json', 'dist/build/sources.js', 'dist/patches/apply.js',
       'patches/ams-access.ts', 'patches/ams-features.tsx',
       'dist/runtime/environment.js', 'dist/runtime/service-identity.js', 'dist/runtime/service-identity.d.ts'];
-    if (service === 'panel') inputs.push('docker/locks/panel-web');
+    if (service === 'panel') inputs.push('deploy/locks/panel-web');
     if (service === 'knowledge' || service === 'memory-proxy') inputs.push('dist/build/native-smoke.js');
   }
   const hash = createHash('sha256').update(`ams-build-inputs-v1\0${service}\0`);
@@ -36,6 +39,10 @@ export async function buildFingerprint(service: ImageService, root = packageRoot
     else throw new Error(`Build inputs must use regular files: ${relative}`);
   }
   for (const input of inputs.sort()) await visit(input);
+  if (!['runtime', 'mcp', 'cli-proxy-api'].includes(service)) {
+    const { revision, url, sha256 } = (await loadSourceLock(projectDir, root)).sources.tencent;
+    add('effective-tencent-source', Buffer.from(JSON.stringify({ revision, url, sha256 })));
+  }
   if (service === 'runtime') add('package.json', Buffer.from(contextPackageJson));
   return `sha256:${hash.digest('hex')}`;
 }

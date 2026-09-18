@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { runtimeFor, integrationConfig } from '../dist/runtime/compose.js';
+import { ProcessFailure } from '../dist/runtime/process.js';
 import { composeDocument, renderCompose } from '../dist/runtime/render-compose.js';
 import { parse } from 'yaml';
 import { resolveDeployment, serviceNames } from '../dist/deployment/model.js';
@@ -19,15 +20,19 @@ async function fixture(t, input=base) {
  await writeFile(join(dir,'.env'),encodeEnv(settings));await writeFile(join(dir,'.ams/images.json'),JSON.stringify(manifest));
  return {dir,settings,project:`ams-${createHash('sha256').update(dir).digest('hex').slice(0,10)}`};
 }
-function runner(project,{pending=[],fatal,owned=[]}={}) {
+function runner(project,{pending=[],fatal,owned=[],bootstrapFailure,connectionKeys=[],adminKey='synthetic-existing-admin'}={}) {
  const commands=[];
  return {commands,async run(c){
   commands.push(c);
+  if(bootstrapFailure && c.args.includes('run') && c.args.includes('bootstrap') && !c.args.includes('initialize')) throw bootstrapFailure;
   if(c.args[0]==='run'&&c.args.includes('--stdin'))return JSON.stringify(fatal?{pending:[],error:fatal}:{pending});
   if(c.args[0]==='info')return JSON.stringify({host:{arch:'arm64'}});
   if(c.args[0]==='image')return JSON.stringify([{Id:c.args.at(-1),Os:'linux',Architecture:'arm64'}]);
+  if(c.args[0]==='exec')return JSON.stringify(JSON.parse(c.input).operation==='list'?connectionKeys:adminKey);
+  if(c.args[0]==='ps'&&c.args.includes('--no-trunc'))return 'a'.repeat(64);
   if(c.args[0]==='ps')return c.args.some(x=>x.startsWith('label=com.docker.compose.service='))?c.args.at(-1).split('=').at(-1):owned.map(x=>x.id).join('\n');
   if(c.args[0]==='inspect') {
+   if(c.args[1]==='a'.repeat(64))return JSON.stringify([{Id:c.args[1],State:{Running:true},Config:{Labels:{'com.docker.compose.project':project,'com.docker.compose.service':'core'}}}]);
    if(owned.some(x=>c.args.includes(x.id)))return JSON.stringify(owned.map(x=>({Id:x.id,Config:{Labels:{'com.docker.compose.project':x.project??project,'com.docker.compose.service':x.service}}})));
    return JSON.stringify([{State:c.args.at(-1)==='bootstrap'?{Status:'exited',ExitCode:0}:{Status:'running',Health:{Status:'healthy'}}}]);
   }
@@ -35,9 +40,9 @@ function runner(project,{pending=[],fatal,owned=[]}={}) {
  }};
 }
 test('all explicit service subsets render exactly their local applications and loopback bindings',()=>{
- for(let mask=1;mask<32;mask++) {
+ for(let mask=1;mask<2**serviceNames.length;mask++) {
   const selected=serviceNames.filter((_,i)=>mask&(1<<i));
-  const env=validateEnv({...base,AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:selected.join(','),REMOTE_CORE_URL:'http://core.remote',REMOTE_CORE_API_KEY:'remote-core',REMOTE_PANEL_URL:'http://panel.remote',REMOTE_MODEL_BASE_URL:'http://models.remote/v1',REMOTE_MODEL_API_KEY:'remote-model'});
+  const env=validateEnv({...base,AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:selected.join(','),REMOTE_KNOWLEDGE_TOOLS_URL:'http://tools.remote',REMOTE_CORE_URL:'http://core.remote',REMOTE_CORE_API_KEY:'remote-core',REMOTE_PANEL_URL:'http://panel.remote',REMOTE_MODEL_BASE_URL:'http://models.remote/v1',REMOTE_MODEL_API_KEY:'remote-model'});
   const doc=composeDocument(env), plan=resolveDeployment(env);
   const rendered=renderCompose(env);
   assert.deepEqual(parse(rendered,{version:'1.1'}),doc,'YAML 1.1 Compose providers preserve scalar types');
@@ -50,28 +55,108 @@ test('all explicit service subsets render exactly their local applications and l
   }
   assert.equal(JSON.stringify(doc).includes('ADMIN_KEY'),false);
  }
- const all=composeDocument(validateEnv(base));assert.equal(Object.values(all.services).flatMap(x=>x.ports??[]).length,2);
+ const all=composeDocument(validateEnv(base));assert.equal(Object.values(all.services).flatMap(x=>x.ports??[]).length,3);
 });
 test('initialization remains stdin-only and explicit readiness never starts native dependencies',async t=>{
  const {dir,project}=await fixture(t);const r=runner(project);const runtime=runtimeFor(dir,'uvx-podman-compose',r.run);
  const secret='private-admin-$literal';await runtime.apply(secret);
  const init=r.commands.find(c=>c.args.includes('initialize'));assert.equal(JSON.parse(init.input).adminKey,secret);
+ assert.equal(init.safeErrorPrefix,'Bootstrap failed: ');
+ assert.ok(r.commands.filter(c=>c!==init).every(c=>c.safeErrorPrefix===undefined));
  assert.ok(!r.commands.some(c=>JSON.stringify(c.args).includes(secret)||JSON.stringify(c.env??{}).includes(secret)));
  for(const c of r.commands.filter(c=>c.args.includes('up'))) { assert.ok(c.args.includes('--no-deps')); assert.equal(c.classifyPortConflict,true); }
  assert.ok(r.commands.filter(c=>c.command==='uvx'&&!c.args.includes('up')).every(c=>c.classifyPortConflict===false));
  r.commands.length=0;await runtime.apply();assert.ok(!r.commands.some(c=>c.args.includes('initialize')));
  const inventory=JSON.parse(await readFile(join(dir,'.ams/applied.json'),'utf8'));assert.ok(inventory.services.includes('knowledge-service'));
 });
-test('existing application detection requires every configured service in this project, regardless of state',async t=>{
+test('partial administrator initialization resumes with its existing credential before starting dependent services',async t=>{
  const {dir,project}=await fixture(t);
- const complete=serviceNames.map(service=>({id:`old-${service}`,service}));
- const all=runner(project,{owned:complete});
- assert.equal(await runtimeFor(dir,'podman-compose',all.run).hasApplicationContainers(),true);
- assert.ok(all.commands.every(c=>['ps','inspect'].includes(c.args[0])));
- for(const owned of [complete.slice(1),complete.map(item=>({...item,project:'unrelated'})),[]]) {
-  const partial=runner(project,{owned});
-  assert.equal(await runtimeFor(dir,'podman-compose',partial.run).hasApplicationContainers(),false);
+ const existingKey='synthetic-existing-admin';
+ const r=runner(project,{owned:[{id:'old-core',service:'core'}],adminKey:existingKey,
+  connectionKeys:[{userId:'user-1',username:'admin',userType:'system_admin',keyId:'key-1',name:'admin',suffix:'dmin'}]});
+ await runtimeFor(dir,'podman-compose',r.run).apply(undefined,{createAdminKey:async()=>assert.fail('existing admin must be preserved')});
+ assert.ok(r.commands.some(c=>c.args.includes('run')&&c.args.includes('bootstrap')));
+ const initialization=r.commands.findIndex(c=>c.args.includes('initialize'));
+ assert.deepEqual(JSON.parse(r.commands[initialization].input),{adminKey:existingKey});
+ assert.ok(!r.commands.some(c=>JSON.stringify(c.args).includes(existingKey)||JSON.stringify(c.env??{}).includes(existingKey)));
+ assert.ok(initialization<r.commands.findIndex(c=>c.args.includes('up')&&c.args.includes('knowledge')));
+ assert.ok(r.commands.some(c=>c.args.includes('up')&&c.args.includes('cli-proxy-api')));
+});
+test('completed installation needs no administrator key lookup or repair',async t=>{
+ const {dir,project}=await fixture(t);
+ await writeFile(join(dir,'.ams/applied.json'),JSON.stringify({version:1,services:['core','bootstrap','config']}));
+ const r=runner(project);
+ await runtimeFor(dir,'podman-compose',r.run).apply(undefined,{createAdminKey:async()=>assert.fail('no generation')});
+ assert.ok(!r.commands.some(c=>c.args.includes('initialize')||c.args[0]==='exec'));
+});
+test('partial installation without an active administrator key fails without generating or replacing one',async t=>{
+ const {dir,project}=await fixture(t);const r=runner(project);
+ await assert.rejects(runtimeFor(dir,'podman-compose',r.run).apply(undefined,{createAdminKey:async()=>assert.fail('no replacement key')}),/no active administrator key/);
+ assert.ok(!r.commands.some(c=>c.args.includes('initialize')||c.args.includes('up')&&c.args.includes('knowledge')));
+});
+test('failed default entity repair leaves no successful applied inventory',async t=>{
+ const {dir,project}=await fixture(t);
+ const r=runner(project,{connectionKeys:[{userId:'user-1',username:'admin',userType:'system_admin',keyId:'key-1',name:'admin',suffix:'dmin'}]});
+ const failure=new ProcessFailure('Bootstrap failed: Default agent is unavailable',1);
+ const run=async c=>{const output=await r.run(c);if(c.args.includes('initialize'))throw failure;return output;};
+ await assert.rejects(runtimeFor(dir,'podman-compose',run).apply(undefined,{createAdminKey:async()=>assert.fail('preserve original key')}),error=>error===failure);
+ await assert.rejects(readFile(join(dir,'.ams/applied.json')),{code:'ENOENT'});
+ assert.ok(!r.commands.some(c=>c.args.includes('up')&&c.args.includes('knowledge')));
+});
+test('interrupted reinitialization invalidates old Core completion and retries with the same saved key',async t=>{
+ const {dir,project}=await fixture(t);
+ const oldInventory={version:1,services:['core','bootstrap','config','knowledge']};
+ const inventoryPath=join(dir,'.ams/applied.json');
+ await writeFile(inventoryPath,JSON.stringify(oldInventory));
+ const key='synthetic-regenerated-admin';
+ const initial=runner(project,{bootstrapFailure:new ProcessFailure('Administrator missing',2)});
+ const failed=new ProcessFailure('Default agent creation failed',1);
+ const run=async c=>{
+  const output=await initial.run(c);
+  if(c.args.includes('initialize')) {
+   assert.deepEqual(JSON.parse(await readFile(inventoryPath,'utf8')),{...oldInventory,coreInitialized:false});
+   throw failed;
+  }
+  return output;
+ };
+ await assert.rejects(runtimeFor(dir,'podman-compose',run).apply(undefined,{createAdminKey:async()=>key}),error=>error===failed);
+ const retry=runner(project,{adminKey:key,connectionKeys:[{userId:'user-1',username:'admin',userType:'system_admin',keyId:'key-1',name:'admin',suffix:'dmin'}]});
+ await runtimeFor(dir,'podman-compose',retry.run).apply(undefined,{createAdminKey:async()=>assert.fail('reuse administrator created by failed apply')});
+ assert.deepEqual(JSON.parse(retry.commands.find(c=>c.args.includes('initialize')).input),{adminKey:key});
+ const completed=JSON.parse(await readFile(inventoryPath,'utf8'));
+ assert.ok(completed.services.includes('core'));
+ assert.notEqual(completed.coreInitialized,false);
+});
+test('fresh Core requests the generated key only after its missing-admin check',async t=>{
+ const {dir,project}=await fixture(t);
+ const r=runner(project,{bootstrapFailure:new ProcessFailure('No active administrator',2)});
+ let requested=0;
+ await runtimeFor(dir,'podman-compose',r.run).apply(undefined,{createAdminKey:async()=>{
+  requested++;
+  assert.ok(r.commands.some(c=>c.args.includes('inspect')&&c.args.at(-1)==='core'));
+  assert.ok(r.commands.at(-1).args.includes('bootstrap'));
+  assert.ok(!r.commands.some(c=>c.args.includes('initialize')));
+  return 'synthetic-generated-admin';
+ }});
+ assert.equal(requested,1);
+ const init=r.commands.find(c=>c.args.includes('initialize'));
+ assert.deepEqual(JSON.parse(init.input),{adminKey:'synthetic-generated-admin'});
+ assert.ok(!JSON.stringify(init.args).includes('synthetic-generated-admin'));
+});
+test('Core check failures never generate a key or attempt initialization',async t=>{
+ const {dir,project}=await fixture(t);
+ for(const bootstrapFailure of [new ProcessFailure('Core authentication failed',1),new ProcessFailure('Compose unavailable',125),new Error('Unknown check failure')]) {
+  const r=runner(project,{bootstrapFailure});
+  await assert.rejects(runtimeFor(dir,'podman-compose',r.run).apply(undefined,{createAdminKey:async()=>assert.fail('no generation after failed check')}),error=>error===bootstrapFailure);
+  assert.ok(!r.commands.some(c=>c.args.includes('initialize')));
  }
+});
+test('cancelled key handoff leaves Core uninitialized',async t=>{
+ const {dir,project}=await fixture(t);
+ const r=runner(project,{bootstrapFailure:new ProcessFailure('No active administrator',2)});
+ const cancelled=new Error('handoff cancelled');
+ await assert.rejects(runtimeFor(dir,'podman-compose',r.run).apply(undefined,{createAdminKey:async()=>{throw cancelled;}}),error=>error===cancelled);
+ assert.ok(!r.commands.some(c=>c.args.includes('initialize')));
 });
 test('CLI-only preflight inspects required images and apply removes only this project containers without volumes',async t=>{
  const {dir,settings,project}=await fixture(t,{AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:'cli-proxy-api',CLIPROXY_API_KEY:'local-key'});
@@ -120,4 +205,17 @@ test('saved authorization probe mounts only auth data read-only and asks for the
   assert.equal(c.args[c.args.indexOf('-v')+1],`${dir}/data/cli-proxy-api/auth:/auth:ro`);
   assert.equal(c.timeoutMs,15000);assert.equal(c.input,undefined);
  }
+});
+
+
+test('MCP uses only generated configuration and starts after protected Knowledge access', () => {
+ const doc=composeDocument(validateEnv(base));
+ assert.deepEqual(doc.services.mcp.volumes, ['./generated:/config:ro']);
+ assert.deepEqual(doc.services.mcp.ports, ['127.0.0.1:8425:8425']);
+ assert.deepEqual(doc.services.mcp.depends_on.access, {condition:'service_healthy'});
+ assert.equal(doc.services.access.ports, undefined);
+ const remote=resolveDeployment(validateEnv({AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:'mcp',REMOTE_CORE_URL:'https://core.remote',REMOTE_CORE_API_KEY:'core-key',REMOTE_KNOWLEDGE_TOOLS_URL:'https://tools.remote'}));
+ const config=integrationConfig(remote,'preflight');
+ assert.deepEqual(config.checks.map(item=>item.kind), ['core','knowledge-tools']);
+ assert.deepEqual(config.toolsPairings,[{coreUrl:'https://core.remote',knowledgeToolsUrl:'https://tools.remote',key:'core-key'}]);
 });

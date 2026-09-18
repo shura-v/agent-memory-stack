@@ -74,9 +74,9 @@ export async function prepareImages(options: PrepareImagesOptions, dependencies:
     if (id !== identity.id || `${inspection?.Os}/${inspection?.Architecture}` !== identity.platform) {
       throw new DeploymentError(`Image verification failed for ${service}: ${runtime} image ID or platform does not match saved metadata. Restore the original image or use a new installation directory.`);
     }
-    if (inspection?.Config?.Labels?.[buildFingerprintLabel] !== await buildFingerprint(service)) {
+    if (inspection?.Config?.Labels?.[buildFingerprintLabel] !== await buildFingerprint(service, undefined, projectDir)) {
       missing.push(service);
-      note?.(`Rebuilding ${service}: its image predates the current packaged build inputs.`);
+      note?.(`Rebuilding ${service}: its image differs from the current build inputs.`);
       continue;
     }
     note?.(`Reusing ${service} (${platform}).`);

@@ -3,11 +3,43 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DeploymentError } from '../runtime/errors.js';
 
 export const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const buildContext = (projectDir: string): string => resolve(projectDir, '.ams-build');
 
-interface SourceLock { revision: string; url: string; sha256: string }
+export interface SourceLock { revision: string; url: string; sha256: string }
+interface UpstreamLock {
+  sources: Record<string, SourceLock>;
+  images: Record<string, string>;
+  [key: string]: unknown;
+}
+
+/** Validate portable source metadata without trusting extra archive fields. */
+export function validateTdaiSource(value: unknown): SourceLock {
+  const source = value as SourceLock;
+  if (!source || typeof source.revision !== 'string' || typeof source.sha256 !== 'string'
+    || !/^[a-f0-9]{40}$/.test(source.revision) || !/^[a-f0-9]{64}$/.test(source.sha256)
+    || source.url !== `https://codeload.github.com/TencentCloud/TencentDB-Agent-Memory/tar.gz/${source.revision}`) {
+    throw new DeploymentError('Invalid TDAI source selection');
+  }
+  return { revision: source.revision, url: source.url, sha256: source.sha256 };
+}
+
+/** Installation updates override only Tencent sources, never packaged build inputs. */
+export async function loadSourceLock(projectDir?: string, root = packageRoot): Promise<UpstreamLock> {
+  const lock = JSON.parse(await readFile(resolve(root, 'upstream.lock.json'), 'utf8')) as UpstreamLock;
+  if (!projectDir) return lock;
+  let raw: string;
+  try { raw = await readFile(resolve(projectDir, '.ams/tdai-source.json'), 'utf8'); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return lock; throw error; }
+  let source: SourceLock;
+  try {
+    source = validateTdaiSource(JSON.parse(raw));
+  } catch { throw new DeploymentError('Invalid .ams/tdai-source.json; restore the saved TDAI source selection before applying'); }
+  lock.sources.tencent = { ...lock.sources.tencent, revision: source.revision, url: source.url, sha256: source.sha256 };
+  return lock;
+}
 
 export function verifyArchive(bytes: Uint8Array, expectedHash: string, name: string): void {
   if (!/^[a-f0-9]{64}$/.test(expectedHash) || createHash('sha256').update(bytes).digest('hex') !== expectedHash) {
@@ -17,7 +49,7 @@ export function verifyArchive(bytes: Uint8Array, expectedHash: string, name: str
 
 /** The installed package supplies immutable inputs; all writes go to projectDir. */
 export async function fetchSources(projectDir = process.cwd()): Promise<string> {
-  const lock = JSON.parse(await readFile(resolve(packageRoot, 'upstream.lock.json'), 'utf8')) as { sources: Record<string, SourceLock> };
+  const lock = await loadSourceLock(projectDir);
   const cache = resolve(buildContext(projectDir), '.cache/upstream');
   await mkdir(cache, { recursive: true });
   for (const [name, source] of Object.entries(lock.sources)) {

@@ -2,7 +2,7 @@ import { lstat, mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { atomicWrite } from '../config/files.js';
 
-const inputPaths = ['.env', '.ams/runtime.json', '.ams/network.json'] as const;
+const inputPaths = ['.env', '.ams/runtime.json', '.ams/network.json', '.ams/tdai-source.json'] as const;
 type Inputs = Record<typeof inputPaths[number], string | null>;
 
 export async function exists(path: string): Promise<boolean> {
@@ -37,9 +37,9 @@ export async function restoreSnapshotInputs(directory: string): Promise<void> {
     ?? await readInput(join(directory, '.ams/before-save.json'));
   if (raw === null) return;
   const inputs = JSON.parse(raw) as Inputs;
-  // Older input snapshots predate network provenance; only that field may be absent.
+  // Older snapshots can predate network provenance and installation-specific TDAI sources.
   if (!inputs || inputPaths.some(path => inputs[path] !== null && typeof inputs[path] !== 'string'
-    && !(path === '.ams/network.json' && inputs[path] === undefined))) {
+    && !(['.ams/network.json', '.ams/tdai-source.json'].includes(path) && inputs[path] === undefined))) {
     throw new Error('Invalid saved input snapshot; existing settings were not replaced');
   }
   for (const path of inputPaths) {

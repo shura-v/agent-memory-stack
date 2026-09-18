@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, stat, symlink } from 'node:fs/
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { snapshotSettings } from '../dist/runtime/snapshot.js';
+import { captureInputs, preserveInputs, recordAppliedInputs, restoreSnapshotInputs } from '../dist/setup/server-settings.js';
 
 test('configuration snapshot preserves the pre-apply bytes across failed retries and excludes data', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'ams-snapshot-'));
@@ -36,4 +37,36 @@ test('snapshot rejects redirected generated files before marking an apply in pro
   await assert.rejects(snapshotSettings(dir), /regular files/);
   await assert.rejects(stat(join(dir, '.ams/apply-pending')), { code: 'ENOENT' });
   assert.equal(await readFile(join(dir, 'private'), 'utf8'), 'outside configuration');
+});
+
+test('TDAI update snapshot retains the applied source while the desired source changes', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'ams-source-snapshot-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await mkdir(join(dir, '.ams'));
+  const pin = '.ams/tdai-source.json';
+  await writeFile(join(dir, pin), 'original source');
+  await recordAppliedInputs(dir, await captureInputs(dir));
+  await preserveInputs(dir);
+  await writeFile(join(dir, pin), 'updated source');
+  await snapshotSettings(dir);
+  await restoreSnapshotInputs(dir);
+  const previous = join(dir, '.ams/previous-settings', pin);
+  assert.equal(await readFile(previous, 'utf8'), 'original source');
+  assert.equal(await readFile(join(dir, pin), 'utf8'), 'updated source');
+  await writeFile(join(dir, pin), 'retry source');
+  await snapshotSettings(dir);
+  await restoreSnapshotInputs(dir);
+  assert.equal(await readFile(previous, 'utf8'), 'original source');
+});
+
+test('legacy applied settings restore the packaged source rather than a new installation pin', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'ams-legacy-source-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await mkdir(join(dir, '.ams'));
+  await writeFile(join(dir, '.ams/last-applied-inputs.json'), JSON.stringify({ '.env': null, '.ams/runtime.json': null }));
+  await writeFile(join(dir, '.ams/tdai-source.json'), 'new source');
+  await snapshotSettings(dir);
+  await restoreSnapshotInputs(dir);
+  await assert.rejects(readFile(join(dir, '.ams/previous-settings/.ams/tdai-source.json')), { code: 'ENOENT' });
+  assert.equal(await readFile(join(dir, '.ams/tdai-source.json'), 'utf8'), 'new source');
 });

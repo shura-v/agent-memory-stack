@@ -3,8 +3,8 @@ import type { Service } from '../deployment/model.js';
 import { stringify } from 'yaml';
 
 type ServiceDefinition = Record<string, unknown>;
-export const imageVariables = { core: 'CORE_IMAGE', knowledge: 'KNOWLEDGE_IMAGE', panel: 'PANEL_IMAGE', 'memory-proxy': 'PROXY_IMAGE', 'cli-proxy-api': 'CLIPROXY_IMAGE', runtime: 'RUNTIME_IMAGE' } as const;
-const ports: Partial<Record<Service, number>> = { core: 8420, knowledge: 8421, panel: 8123, 'memory-proxy': 8096 };
+export const imageVariables = { core: 'CORE_IMAGE', knowledge: 'KNOWLEDGE_IMAGE', panel: 'PANEL_IMAGE', 'memory-proxy': 'PROXY_IMAGE', 'cli-proxy-api': 'CLIPROXY_IMAGE', mcp: 'MCP_IMAGE', runtime: 'RUNTIME_IMAGE' } as const;
+const ports: Partial<Record<Service, number>> = { core: 8420, knowledge: 8421, panel: 8123, 'memory-proxy': 8096, mcp: 8425 };
 const common = () => ({ restart: 'unless-stopped', networks: ['stack'], security_opt: ['no-new-privileges:true'], cap_drop: ['ALL'], logging: { driver: 'json-file', options: { 'max-size': '10m', 'max-file': '3' } } });
 const health = (port: number) => ({ interval: '10s', timeout: '5s', retries: 12, start_period: '30s', test: ['CMD', 'node', '-e', `fetch('http://127.0.0.1:${port}/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))`] });
 const image = (service: keyof typeof imageVariables) => '${' + imageVariables[service] + '}';
@@ -17,6 +17,7 @@ export function composeDocument(settings: Record<string, string>): { services: R
   services.config = { image: image('runtime'), user: '0:0', command: ['runtime/config.js', 'generate', '/state'], environment: { AMS_DATA_ROOT: '/data', AMS_SERVICE_UID: '10001' }, volumes: ['./:/state', '${DATA_DIR}:/data'], network_mode: 'none', restart: 'no' };
   for (const name of plan.services) {
     const item: ServiceDefinition = { ...common(), image: image(name), volumes: ['./generated:/config:ro', data(name === 'memory-proxy' ? 'proxy' : name)] };
+    if (name === 'mcp') item.volumes = ['./generated:/config:ro'];
     if (ports[name]) item.healthcheck = health(ports[name]!);
     services[name] = item;
   }

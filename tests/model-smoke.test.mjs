@@ -8,7 +8,6 @@ import { setupServer } from '../dist/setup/server.js';
 import { createTargetStore } from '../dist/setup/targets.js';
 import { runtimeFor } from '../dist/runtime/compose.js';
 import { runProcess } from '../dist/runtime/process.js';
-import { generateKey } from '../dist/config/settings.js';
 import { encodeEnv, readEnv } from '../dist/config/files.js';
 
 // Opt-in actual Core + Proxy/Hono integration. The sole LLM upstream is an
@@ -23,8 +22,6 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const model = 'ams-unlisted-model-smoke-2026';
 const userText = 'AMS_L0_SMOKE: remember that the synthetic release color is violet.';
 const assistantText = 'AMS synthetic assistant response, persisted as L0.';
-const proxyOrigin = 'http://127.0.0.1:19096';
-const panelOrigin = 'http://127.0.0.1:19123';
 
 async function eventually(read, accept, label, timeout = 30_000) {
   const deadline = Date.now() + timeout;
@@ -43,10 +40,10 @@ test('actual model instructions, no-task L0 and SSE cancellation', { skip: !enab
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   await mkdir(join(directory, '.ams'));
   await writeFile(join(directory, '.ams/images.json'), JSON.stringify(manifest));
-  const admin = generateKey('admin'); // Remains in memory and the authoritative test database only.
-  const answers = { directory, provider, admin,
+  let admin; // Captured from setup; remains in memory and the authoritative test database only.
+  const answers = { directory, provider,
     MEMORY_PROXY_PUBLIC_URL: 'http://127.0.0.1:19096', KNOWLEDGE_PUBLIC_URL: 'http://127.0.0.1:19422',
-    PANEL_PUBLIC_URL: 'http://127.0.0.1:19123', MEMORY_PROXY_PORT: '19096', KNOWLEDGE_PORT: '19422', PANEL_PORT: '19123',
+    PANEL_PUBLIC_URL: 'http://127.0.0.1:19123', MEMORY_PROXY_PORT: '19096', KNOWLEDGE_PORT: '19422', PANEL_PORT: '19123', MCP_PORT: '19425',
     LLM_BASE_URL: 'http://127.0.0.1:9/v1', LLM_API_KEY: 'synthetic-unused-provider-key',
     MEMORY_LLM_MODEL: 'memory-fixture', KNOWLEDGE_LLM_MODEL: 'wiki-fixture' };
   // Network settings now come from .env; this fixture explicitly exercises direct HTTP injection.
@@ -67,13 +64,16 @@ test('actual model instructions, no-task L0 and SSE cancellation', { skip: !enab
   const ui = {
     async multiselect(_id, _message, _choices, initial) { return initial; },
     async text(q) { const value = answers[q.id] ?? q.initial; assert.equal(typeof value, 'string', q.id); return value; },
-    async select(id, _message, _choices, initial) { return id === 'generate:admin' ? 'manual' : answers[id] ?? initial; },
-    async confirm(id, _message, initial) { return id === 'apply' ? true : id === 'login' ? false : initial; },
-    note() {}, async handoff(key) { assert.ok(key === admin); },
+    async select(id, _message, _choices, initial) { return answers[id] ?? initial; },
+    async confirm(id, _message, initial) { return id === 'apply' ? true : initial; },
+    note() {}, async handoff(key) { admin = key; },
   };
-  // Explicitly use the production runtime factory, including real bootstrap.
-  await setupServer(ui, { runtime: runtimeFor, targets: createTargetStore(join(directory, 'targets.json')) });
+  // Use production lifecycle/bootstrap; this synthetic inference test does not exercise account login.
+  await setupServer(ui, { runtime: (...args) => ({ ...runtimeFor(...args), hasProviderAuthorization: async () => true }), targets: createTargetStore(join(directory, 'targets.json')) });
+  assert.ok(typeof admin === 'string' && /^sk-ams-admin-[a-f0-9]{64}$/.test(admin), 'setup hands off the generated administrator key before authentication');
   const env = await readEnv(join(directory, '.env'));
+  const proxyOrigin = `http://127.0.0.1:${env.MEMORY_PROXY_PORT}`;
+  const panelOrigin = `http://127.0.0.1:${env.PANEL_PORT}`;
   const proxyFile = join(directory, 'generated/proxy.yaml');
   const originalConfig = JSON.parse(await readFile(proxyFile, 'utf8'));
   assert.equal(originalConfig.auth.url, 'http://core:8420', 'auth loader appends its own verify route');

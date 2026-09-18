@@ -3,7 +3,14 @@ import { serviceEndpoint } from '../runtime/service-identity.js';
 
 export type ModelDiscovery = (baseUrl: string, apiKey: string) => Promise<string[]>;
 
-/** Best-effort discovery; manual model entry remains available on any failure. */
+export class ModelAccessError extends Error {
+  constructor(readonly status: 401 | 403) {
+    super(status === 401 ? 'The API rejected your key (HTTP 401). Check the API key and base URL.'
+      : 'The API denied access to the model list (HTTP 403). Check the API key, permissions, and base URL.');
+  }
+}
+
+/** Unsupported/unavailable discovery permits manual entry; explicit access failures remain visible. */
 export async function discoverModels(baseUrl: string, apiKey: string, fetcher: typeof fetch = fetch): Promise<string[]> {
   const controller = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
@@ -18,6 +25,7 @@ export async function discoverModels(baseUrl: string, apiKey: string, fetcher: t
         redirect: 'error', signal: controller.signal,
       });
       reader = response.body?.getReader();
+      if (response.status === 401 || response.status === 403) throw new ModelAccessError(response.status);
       if (!response.ok || !reader || Number(response.headers.get('content-length')) > limit) return [];
       const chunks: Uint8Array[] = [];
       let bytes = 0;
@@ -36,7 +44,10 @@ export async function discoverModels(baseUrl: string, apiKey: string, fetcher: t
         return [item.id];
       });
       return [...new Set(ids)];
-    } catch { return []; }
+    } catch (error) {
+      if (error instanceof ModelAccessError) throw error;
+      return [];
+    }
   };
   try {
     return await Promise.race([

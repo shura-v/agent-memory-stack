@@ -14,14 +14,14 @@ const configured = {
   MEMORY_LLM_MODEL: 'memory-model', KNOWLEDGE_LLM_MODEL: 'knowledge-model',
   REMOTE_CORE_URL: 'https://backend.invalid/memory', REMOTE_CORE_API_KEY: 'remote-core-key',
   REMOTE_MODEL_BASE_URL: 'https://models.invalid/api/v1', REMOTE_MODEL_API_KEY: 'remote-model-key',
-  REMOTE_KNOWLEDGE_URL: 'https://knowledge-service.invalid/private', REMOTE_PANEL_URL: 'https://panel-service.invalid/callbacks',
+  REMOTE_KNOWLEDGE_TOOLS_URL: 'https://knowledge-tools.invalid', REMOTE_KNOWLEDGE_URL: 'https://knowledge-service.invalid/private', REMOTE_PANEL_URL: 'https://panel-service.invalid/callbacks',
 };
 function settings(services, overrides = {}) {
   return { ...configured, AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: services.join(','), ...overrides };
 }
 
-test('all 31 non-empty selections resolve only selected applications and required helpers', () => {
-  for (let mask = 1; mask < 32; mask++) {
+test('all 63 non-empty selections resolve only selected applications and required helpers', () => {
+  for (let mask = 1; mask < 2 ** serviceNames.length; mask++) {
     const selected = serviceNames.filter((_, index) => mask & (1 << index));
     const env = validateEnv(settings(selected));
     const plan = resolveDeployment(env);
@@ -30,6 +30,7 @@ test('all 31 non-empty selections resolve only selected applications and require
     assert.equal(plan.helpers.includes('bootstrap'), selected.includes('core'));
     assert.equal(plan.helpers.includes('access'), selected.includes('knowledge'));
     assert.equal(plan.helpers.includes('knowledge-service'), selected.includes('knowledge'));
+    assert.equal('mcp.json' in serviceConfigs(env), selected.includes('mcp'));
     assert.equal('core.yaml' in serviceConfigs(env), selected.includes('core'));
     assert.equal('proxy.yaml' in serviceConfigs(env), selected.includes('memory-proxy'));
     assert.equal('knowledge-env.json' in serviceConfigs(env), selected.includes('knowledge'));
@@ -123,7 +124,7 @@ test('selected-only generation cleans obsolete generated secrets while retaining
 test('Knowledge publication is opt-in while its internal gateway and normal features remain available', () => {
   const env = validateEnv(settings(serviceNames, { KNOWLEDGE_PORT: '18422', KNOWLEDGE_PUBLIC_URL: 'https://saved-tools.invalid' }));
   const deployment = resolveDeployment(env);
-  assert.deepEqual(deployment.interfaces.map(binding => binding.service), ['memory-proxy', 'panel']);
+  assert.deepEqual(deployment.interfaces.map(binding => binding.service), ['memory-proxy', 'panel', 'mcp']);
   assert.ok(deployment.helpers.includes('access'));
   const configs = serviceConfigs(env);
   assert.equal(configs['proxy-env.json'].AMS_KNOWLEDGE_ENABLED, 'true');
@@ -136,4 +137,29 @@ test('Knowledge publication is opt-in while its internal gateway and normal feat
   assert.ok(resolveDeployment(exposed).interfaces.some(binding => binding.service === 'access' && binding.port === 18422));
   assert.equal(serviceConfigs(exposed)['proxy-env.json'].AMS_KNOWLEDGE_HTTP_ENABLED, 'true');
   assert.equal(serviceConfigs(exposed)['proxy-env.json'].AMS_KNOWLEDGE_URL, 'https://saved-tools.invalid');
+});
+
+
+test('MCP defaults to an internal protected Knowledge dependency and never persists user credentials', () => {
+  const env = validateEnv(settings(serviceNames));
+  const plan = resolveDeployment(env);
+  assert.equal(env.MCP_PORT, '8425');
+  assert.deepEqual(plan.interfaces.find(item => item.service === 'mcp'), { service: 'mcp', field: 'MCP_PORT', port: 8425, target: 8425, audience: 'user' });
+  assert.deepEqual(serviceConfigs(env)['mcp.json'], { port: 8425, coreUrl: 'http://core:8420', coreApiKey: configured.CORE_API_KEY, knowledgeToolsUrl: 'http://access:8080', serviceId: 'ams' });
+  assert.ok(!plan.dataDirectories.includes('mcp'));
+  assert.ok(!plan.interfaces.some(item => item.service === 'access'));
+  assert.ok(plan.readiness.find(item => item.service === 'mcp').dependsOn.includes('access'));
+  assert.equal(Object.keys(env).some(key => key.startsWith('KNOWLEDGETOOLS_')), false);
+});
+
+test('MCP alone requires explicit Core and protected tools endpoints without Panel or raw Knowledge', () => {
+  const env = validateEnv(settings(['mcp'], { REMOTE_PANEL_URL: '', REMOTE_KNOWLEDGE_URL: '', LLM_API_KEY: '' }));
+  const plan = resolveDeployment(env);
+  assert.deepEqual(plan.helpers, ['config']);
+  assert.deepEqual(Object.keys(serviceConfigs(env)), ['mcp.json']);
+  assert.equal(serviceConfigs(env)['mcp.json'].knowledgeToolsUrl, configured.REMOTE_KNOWLEDGE_TOOLS_URL);
+  for (const field of ['REMOTE_CORE_URL', 'REMOTE_CORE_API_KEY', 'REMOTE_KNOWLEDGE_TOOLS_URL']) {
+    assert.throws(() => validateEnv(settings(['mcp'], { [field]: '' })), new RegExp(field));
+  }
+  assert.deepEqual(selectionFromEnv(settings(serviceNames.filter(service => service !== 'mcp'))), serviceNames.filter(service => service !== 'mcp'));
 });

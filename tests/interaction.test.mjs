@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import { createInteraction } from '../dist/cli/interaction.js';
 import { Cancelled } from '../dist/setup/interaction.js';
 
+test('explicit copyable output writes a key as one undecorated line', () => {
+  const chunks = [];
+  const ui = createInteraction({ note: () => assert.fail('Copyable keys must not be boxed') }, undefined, { write: chunk => chunks.push(chunk) });
+  const key = 'sk-ams-user-' + 'a'.repeat(64);
+  ui.print(key);
+  assert.deepEqual(chunks, [key + '\n']);
+});
+
 test('Clack adapter passes saved checkbox values and leaves empty selection to the workflow', async () => {
   const choices = [{ value: 'core', label: 'Core (memory storage)' }, { value: 'panel', label: 'Panel (web interface)' }];
   let received;

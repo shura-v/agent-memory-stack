@@ -6,13 +6,14 @@ import { accountProviders } from './providers.js';
 export type Field = { name: string; label: string; default?: string; placeholder?: string; secret?: boolean; role?: 'core' | 'cliproxy'; choices?: string[] };
 export const fields: Field[] = [
   { name: 'AMS_DEPLOYMENT_VERSION', label: 'Deployment schema version', default: '1' },
-  { name: 'AMS_SERVICES', label: 'Services on this machine', default: 'core,knowledge,panel,memory-proxy,cli-proxy-api' },
+  { name: 'AMS_SERVICES', label: 'Services on this machine', default: 'core,knowledge,panel,memory-proxy,cli-proxy-api,mcp' },
   ...['CORE', 'MODEL', 'KNOWLEDGE', 'PANEL', 'PROXY'].map(prefix => ({ name: `${prefix}_MODE`, label: `${prefix} dependency mode`, choices: ['local', 'remote', 'disabled'] })),
   { name: 'REMOTE_CORE_URL', label: 'Remote Core service base URL (reachable from containers)' },
   { name: 'REMOTE_CORE_API_KEY', label: 'Existing remote Core service key (use the key from the machine running Core)', secret: true },
   { name: 'REMOTE_MODEL_BASE_URL', label: 'Remote model API base URL (including its API prefix)' },
   { name: 'REMOTE_MODEL_API_KEY', label: 'Existing remote model API key', secret: true },
   { name: 'REMOTE_KNOWLEDGE_URL', label: 'Remote authenticated Knowledge service base URL' },
+  { name: 'REMOTE_KNOWLEDGE_TOOLS_URL', label: 'Remote protected Knowledge tools base URL' },
   { name: 'REMOTE_PANEL_URL', label: 'Remote Panel callback base URL (reachable from containers)' },
   ...['CORE', 'CLIPROXY', 'KNOWLEDGE'].map(prefix => ({ name: `${prefix}_SERVICE_ENABLED`, label: `Allow ${prefix} service connections from another machine`, default: 'false', choices: ['false', 'true'] })),
   { name: 'KNOWLEDGE_TOOLS_PUBLIC_ENABLED', label: 'Expose authenticated Knowledge HTTP tools', default: 'false', choices: ['false', 'true'] },
@@ -21,6 +22,7 @@ export const fields: Field[] = [
   { name: 'KNOWLEDGE_SERVICE_PORT', label: 'Knowledge authenticated service loopback port', default: '8423' },
   { name: 'MEMORY_PROXY_PORT', label: 'MemoryProxy loopback port', default: '8096' },
   { name: 'KNOWLEDGE_PORT', label: 'Knowledge loopback port', default: '8422' },
+  { name: 'MCP_PORT', label: 'MCP loopback port', default: '8425' },
   { name: 'PANEL_PORT', label: 'Panel loopback port', default: '8123' },
   { name: 'MEMORY_PROXY_PUBLIC_URL', label: 'MemoryProxy HTTP(S) origin', default: 'http://127.0.0.1:8096' },
   { name: 'KNOWLEDGE_PUBLIC_URL', label: 'Knowledge HTTP(S) origin', default: 'http://127.0.0.1:8422' },
@@ -88,7 +90,7 @@ export function validateEnv(input: Record<string, string>): Record<string, strin
   if (errors.length) throw new DeploymentError(`Set valid values in .env: ${[...new Set(errors)].join(', ')}`);
   for (const f of consumed.filter(f => f.name.endsWith('_PUBLIC_URL'))) env[f.name] = origin(env[f.name]);
   for (const f of consumed.filter(f => f.name === 'LLM_BASE_URL' || /^REMOTE_.*_URL$/.test(f.name))) env[f.name] = apiBase(env[f.name]);
-  for (const [name, connection] of Object.entries(deployment.connections)) env[`${name.toUpperCase()}_MODE`] = connection.mode;
+  for (const [name, connection] of Object.entries(deployment.connections).filter(([name]) => name !== 'knowledgeTools')) env[`${name.toUpperCase()}_MODE`] = connection.mode;
   return env;
 }
 export function reviewSettings(env: Record<string, string>): string {

@@ -190,3 +190,21 @@ test('patched bridge rejects stolen session, wrong instance and removed member',
     method: 'POST', headers: { authorization: 'Bearer alice-key' },
   }))).status, 401);
 });
+
+test('protected tools identity verifies service key and actual Knowledge/Core pairing', async t => {
+  let mismatch = false;
+  const calls = [];
+  const server = http.createServer(createGatewayHandler(gatewayConfig({ CORE_API_KEY: 'backend-secret' }), async (url, init) => {
+    calls.push({ url: String(url), headers: init.headers });
+    return Response.json(new URL(url).hostname === 'core' ? { coreId: 'core-one' }
+      : { coreId: mismatch ? 'core-two' : 'core-one', knowledgeId: 'knowledge-one' });
+  }));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = `http://127.0.0.1:${server.address().port}/ams/identity`;
+  assert.equal((await fetch(url)).status, 401); assert.equal(calls.length, 0);
+  const headers = { authorization: 'Bearer backend-secret', 'x-tdai-service-id': 'ams' };
+  const response = await fetch(url, { headers }); assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { coreId: 'core-one', knowledgeId: 'knowledge-one' });
+  mismatch = true; assert.equal((await fetch(url, { headers })).status, 409);
+});

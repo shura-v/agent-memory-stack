@@ -1,5 +1,5 @@
 FROM docker.io/library/node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS base
-COPY docker/debian.sources /etc/apt/sources.list.d/debian.sources
+COPY deploy/debian.sources /etc/apt/sources.list.d/debian.sources
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini git && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid 10001 --create-home app && mkdir /data && chown app:app /data
 WORKDIR /app
@@ -13,14 +13,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 ENV NODE_ENV=development npm_config_build_from_source=true npm_config_strict_allow_scripts=true
 
 FROM builder AS core-build
-COPY docker/locks/core/package*.json ./
+COPY deploy/locks/core/package*.json ./
 RUN npm ci --omit=dev --legacy-peer-deps --no-audit --no-fund
 RUN node --import tsx -e "const {DatabaseSync}=await import('node:sqlite'); const vec=await import('sqlite-vec'); const db=new DatabaseSync(':memory:',{allowExtension:true}); vec.load(db); db.prepare('select vec_version()').get(); db.close(); await import('@node-rs/jieba')"
 COPY .cache/upstream/tencent/MemoryCore/ ./
-COPY docker/locks/core/package*.json ./
+COPY deploy/locks/core/package*.json ./
 
 FROM base AS core
-LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="0468a2a5b50eaafc54758ed1e2e6609472e5b6ce"
+ARG TDAI_REVISION
+LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="${TDAI_REVISION}"
 COPY --from=core-build --chown=10001:10001 /app /app
 COPY .cache/upstream/tencent/LICENSE /app/LICENSE
 COPY dist/runtime/environment.js /runtime/environment.mjs
@@ -30,16 +31,17 @@ EXPOSE 8420
 ENTRYPOINT ["/usr/bin/tini", "--", "node", "--import", "/runtime/environment.mjs", "--import", "tsx", "src/gateway/server.ts"]
 
 FROM builder AS knowledge-build
-COPY docker/locks/knowledge/package*.json ./
+COPY deploy/locks/knowledge/package*.json ./
 RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY dist/build/native-smoke.js /tmp/native-smoke.mjs
 COPY .cache/upstream/tencent/MemoryKnowledge/ ./
-COPY docker/locks/knowledge/package*.json ./
+COPY deploy/locks/knowledge/package*.json ./
 RUN npm run build && npm prune --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund
 RUN node /tmp/native-smoke.mjs knowledge
 
 FROM base AS knowledge
-LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="0468a2a5b50eaafc54758ed1e2e6609472e5b6ce"
+ARG TDAI_REVISION
+LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="${TDAI_REVISION}"
 COPY --from=knowledge-build --chown=10001:10001 /app /app
 COPY .cache/upstream/tencent/LICENSE /app/LICENSE
 COPY dist/runtime/environment.js /runtime/environment.mjs
@@ -49,24 +51,25 @@ EXPOSE 8421
 ENTRYPOINT ["/usr/bin/tini", "--", "node", "--import", "/runtime/environment.mjs", "dist/server.mjs"]
 
 FROM builder AS panel-web-build
-COPY docker/locks/panel-web/package*.json ./
+COPY deploy/locks/panel-web/package*.json ./
 RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY .cache/upstream/tencent/MemoryPanel/web/ ./
-COPY docker/locks/panel-web/package*.json ./
+COPY deploy/locks/panel-web/package*.json ./
 RUN npm run build
 
 FROM builder AS panel-build
-COPY docker/locks/panel/package*.json ./
+COPY deploy/locks/panel/package*.json ./
 RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY .cache/upstream/tencent/MemoryPanel/ ./
-COPY docker/locks/panel/package*.json ./
+COPY deploy/locks/panel/package*.json ./
 RUN npm run build && npm prune --omit=dev --legacy-peer-deps --ignore-scripts --no-audit --no-fund
 # Panel uses tsc with allowJs=false: preserve the shared ESM helper explicitly.
 RUN node --input-type=module -e "import {copyFileSync} from 'node:fs'; copyFileSync('src/ams-integration.js', 'dist/ams-integration.js'); const {buildPanelApp}=await import('./dist/panel/http/app.js'); if(typeof buildPanelApp!=='function') throw new Error('Panel entry module unavailable')"
 COPY --from=panel-web-build /app/dist ./web/dist
 
 FROM base AS panel
-LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="0468a2a5b50eaafc54758ed1e2e6609472e5b6ce"
+ARG TDAI_REVISION
+LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="${TDAI_REVISION}"
 COPY --from=panel-build --chown=10001:10001 /app /app
 COPY .cache/upstream/tencent/LICENSE /app/LICENSE
 COPY dist/runtime/environment.js /runtime/environment.mjs
@@ -76,15 +79,16 @@ EXPOSE 8123
 ENTRYPOINT ["/usr/bin/tini", "--", "node", "--import", "/runtime/environment.mjs", "dist/index.js"]
 
 FROM builder AS proxy-build
-COPY docker/locks/proxy/package*.json ./
+COPY deploy/locks/proxy/package*.json ./
 RUN npm ci --legacy-peer-deps --no-audit --no-fund
 COPY dist/build/native-smoke.js /tmp/native-smoke.mjs
 RUN node /tmp/native-smoke.mjs proxy
 COPY .cache/upstream/tencent/MemoryProxy/ ./
-COPY docker/locks/proxy/package*.json ./
+COPY deploy/locks/proxy/package*.json ./
 
 FROM base AS memory-proxy
-LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="0468a2a5b50eaafc54758ed1e2e6609472e5b6ce"
+ARG TDAI_REVISION
+LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="${TDAI_REVISION}"
 COPY --from=proxy-build --chown=10001:10001 /app /app
 COPY .cache/upstream/tencent/LICENSE /app/LICENSE
 COPY dist/runtime/environment.js /runtime/environment.mjs

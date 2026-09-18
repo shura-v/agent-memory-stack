@@ -94,3 +94,19 @@ test('Knowledge service streams uploads through the fixed route boundary and gat
     });
   } finally { for (const server of servers.reverse()) await close(server); await rm(dir, { recursive: true, force: true }); }
 });
+
+
+test('protected tools pairing rejects other Core instances and unprotected service identities', async () => {
+  const config = { checks: [{ name: 'tools', kind: 'knowledge-tools', url: 'http://tools', key }], toolsPairings: [{ coreUrl: 'http://core', knowledgeToolsUrl: 'http://tools', key }] };
+  let toolsIdentity = { coreId: 'core-one', knowledgeId: 'knowledge-one' };
+  const fetcher = async (url, init) => {
+    assert.deepEqual(init.headers, serviceHeaders(key));
+    return Response.json(url.startsWith('http://core/') ? { coreId: 'core-one' } : toolsIdentity);
+  };
+  assert.deepEqual(await probeIntegration(config, fetcher), { pending: [] });
+  toolsIdentity = { coreId: 'different-core', knowledgeId: 'knowledge-one' };
+  await assert.rejects(probeIntegration(config, fetcher), /identity mismatch/);
+  toolsIdentity = { coreId: 'core-one' };
+  await assert.rejects(probeIntegration(config, fetcher), /Wrong service identity/);
+  await assert.rejects(probeIntegration(config, async () => new Response('', {status: 401})), /authentication rejected/);
+});

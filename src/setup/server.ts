@@ -7,9 +7,9 @@ import { readAppliedInventory, runtimeFor } from '../runtime/compose.js';
 import { imageVariables, renderCompose } from '../runtime/render-compose.js';
 import type { DeploymentRuntime, Provider } from '../runtime/compose.js';
 import type { ImageService } from '../build/images.js';
-import { Cancelled, remember } from './interaction.js';
+import { Cancelled } from './interaction.js';
 import type { Interaction } from './interaction.js';
-import { keyOptions, selectServices, serverQuestions } from './questions.js';
+import { selectServices, serverQuestions } from './questions.js';
 import type { ModelDiscovery } from './model-discovery.js';
 import { prepareImages } from './images.js';
 import { DeploymentError, PortBindingConflict } from '../runtime/errors.js';
@@ -22,6 +22,7 @@ import type { AccountProvider } from '../config/providers.js';
 import type { ServiceInterface } from '../deployment/model.js';
 
 function interfaceDescription(item: ServiceInterface): string {
+  if (item.service === 'mcp') return `MCP: 127.0.0.1:${item.port}/mcp (Knowledge tools, Streamable HTTP)`;
   if (item.service === 'panel') return `Panel: 127.0.0.1:${item.port} (web interface)`;
   if (item.service === 'memory-proxy') return `MemoryProxy: 127.0.0.1:${item.port} (agent API)`;
   return `${item.service}: 127.0.0.1:${item.port} (${item.audience === 'service' ? 'authenticated service consumers; operator-managed forwarding' : 'agent tools'})`;
@@ -32,6 +33,17 @@ async function appliedServices(directory: string, existing: Record<string, strin
   return inventory?.services ?? (Object.keys(existing).length ? resolveDeployment(existing, { requireConnections: false }).containers : []);
 }
 
+function withAccountProvider(source: string, provider: AccountProvider): string {
+  const assignment = `CLIPROXY_AUTH_PROVIDER=${provider}`;
+  let found = false;
+  const updated = source.replace(/^CLIPROXY_AUTH_PROVIDER=([^\r\n]*)/gm, (_line, value: string) => {
+    found = true;
+    const comment = /([ \t]+#[^\r\n]*)$/.exec(value)?.[1] ?? '';
+    return assignment + comment;
+  });
+  return found ? updated : `${source}${source && !source.endsWith('\n') ? '\n' : ''}${assignment}\n`;
+}
+
 export interface ServerSetupOptions {
   cwd?: string;
   runtime?: (directory: string, provider: Provider) => DeploymentRuntime;
@@ -40,7 +52,7 @@ export interface ServerSetupOptions {
   targets?: TargetStore;
 }
 
-async function savedProvider(directory: string): Promise<Provider> {
+export async function savedProvider(directory: string): Promise<Provider> {
   try {
     const { provider } = JSON.parse(await readFile(join(directory, '.ams/runtime.json'), 'utf8'));
     if (!['docker', 'podman', 'podman-compose', 'uvx-podman-compose'].includes(provider)) throw new DeploymentError('Invalid saved container engine in .ams/runtime.json. Run ams and select the container engine again.');
@@ -99,13 +111,13 @@ export async function applyServer(ui: Interaction, directory: string, options: S
   const runtime = (options.runtime ?? runtimeFor)(directory, provider);
   await runtime.checkProvider?.();
   let adminKey: string | undefined;
-  if (services.includes('core') && !await runtime.hasApplicationContainers?.()) {
-    adminKey = await ui.select('generate:admin', 'Administrator key', keyOptions, 'generate') === 'generate'
-      ? remember(ui, 'key:admin', () => generateKey('admin'))
-      : await ui.text({ id: 'admin', message: 'Administrator key', secret: true,
-        validate: value => !value.trim() || /[\x00-\x20\x7f]/.test(value) ? 'Enter a nonempty key without whitespace' : undefined });
-    await ui.handoff(adminKey);
-  }
+  const createAdminKey = services.includes('core') ? async () => {
+    if (adminKey) return adminKey;
+    const key = generateKey('admin');
+    await ui.handoff(key);
+    adminKey = key;
+    return key;
+  } : undefined;
   ui.commit?.();
   await preserveInputs(directory);
   const manifest = await (options.prepareImages ?? prepareImages)({
@@ -125,6 +137,7 @@ export async function applyServer(ui: Interaction, directory: string, options: S
   if (runtime.snapshot && !snapshotPending) await restoreSnapshotInputs(directory);
   await atomicWrite(join(directory, '.ams/images.json'), JSON.stringify(manifest, null, 2) + '\n');
   let result: Awaited<ReturnType<DeploymentRuntime['apply']>> = undefined;
+  let appliedInputs: Awaited<ReturnType<typeof captureInputs>> | undefined;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const reservation = await runtime.reservePorts?.(manifest, env);
     try {
@@ -138,11 +151,11 @@ export async function applyServer(ui: Interaction, directory: string, options: S
       const composeEnv = resolved.requiredImages.map(service => `${imageVariables[service as ImageService]}=${manifest.images[service as ImageService]!.id}`);
       for (const key of ['DATA_DIR', ...resolved.interfaces.map(item => item.field)]) composeEnv.push(`${key}='${env[key].replace(/'/g, "\\'")}'`);
       await atomicWrite(join(directory, '.ams/compose.env'), composeEnv.join('\n') + '\n');
-      const appliedInputs = await captureInputs(directory);
+      appliedInputs = await captureInputs(directory);
       // Helpers hold engine bindings until the containers are ready to take over.
       await reservation?.release();
       ui.note('Applying selected local services. Each readiness stage can take up to 90 seconds.');
-      result = await runtime.apply(adminKey, { allowPending });
+      result = await runtime.apply(undefined, { allowPending, createAdminKey });
       await recordAppliedInputs(directory, appliedInputs);
       break;
     } catch (error) {
@@ -158,14 +171,33 @@ export async function applyServer(ui: Interaction, directory: string, options: S
   ui.note(interfaces.join('\n'), 'Published loopback interfaces');
   ui.note(result?.pending.length ? `Local processes started; integrations pending:\n${result.pending.join('\n')}\nRun ams apply after their peers are available.` : 'Selected local containers started. External access, model authorization and semantic memory are separate checks.');
   if (services.includes('cli-proxy-api')) {
-    const provider = env.CLIPROXY_AUTH_PROVIDER as AccountProvider;
-    if (!await runtime.hasProviderAuthorization?.(provider)
-      && await ui.confirm('login', `Log in to ${accountProviders[provider].label} for local CLIProxyAPI now?`, false)) {
-      if (provider === 'claude') ui.note('Open the displayed URL in your browser. When redirected to localhost, copy the full callback URL from the address bar, even if the page cannot connect. Paste it when the terminal prompts after 15 seconds; do not submit an empty answer. No public callback port is required.', 'Claude login');
-      await runtime.login(provider);
-      if (runtime.hasProviderAuthorization && !await runtime.hasProviderAuthorization(provider)) {
-        throw new DeploymentError(`${accountProviders[provider].label} login did not save authorization. Run ams apply to retry.`);
+    const savedProvider = env.CLIPROXY_AUTH_PROVIDER as AccountProvider;
+    if (!await runtime.hasProviderAuthorization?.(savedProvider)) {
+      const selectedProvider = await ui.select<AccountProvider>('login', 'CLIProxyAPI account login', [
+        { value: 'codex', label: accountProviders.codex.label },
+        { value: 'claude', label: accountProviders.claude.label },
+      ], savedProvider);
+      let needsLogin = true;
+      if (selectedProvider !== savedProvider) {
+        const path = join(directory, '.env');
+        await atomicWrite(path, withAccountProvider(await readFile(path, 'utf8'), selectedProvider));
+        needsLogin = !await runtime.hasProviderAuthorization?.(selectedProvider);
+      }
+      if (needsLogin) {
+        if (selectedProvider === 'claude') ui.note('Open the displayed URL in your browser. When redirected to localhost, copy the full callback URL from the address bar, even if the page cannot connect. Paste it when the terminal prompts after 15 seconds; do not submit an empty answer. No public callback port is required.', 'Claude login');
+        await runtime.login(selectedProvider);
+        if (runtime.hasProviderAuthorization && !await runtime.hasProviderAuthorization(selectedProvider)) {
+          throw new DeploymentError(`${accountProviders[selectedProvider].label} login did not save authorization. Run ams apply to retry.`);
+        }
+      }
+      if (selectedProvider !== savedProvider && appliedInputs?.['.env']) {
+        // Authorization completed: include this selection in the next rollback baseline.
+        // Keep the other inputs captured at apply time, even if files changed during login.
+        await recordAppliedInputs(directory, {
+          ...appliedInputs, '.env': withAccountProvider(appliedInputs['.env'], selectedProvider),
+        });
       }
     }
   }
+  ui.note('Run ams and choose Show connection details to see connection ports and all configured keys.', 'Connection details');
 }

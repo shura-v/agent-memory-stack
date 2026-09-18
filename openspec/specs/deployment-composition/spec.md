@@ -43,7 +43,7 @@ Stack setup SHALL support Escape to return to the previous question and Ctrl+C t
 
 #### Scenario: Cancel administrator key handoff after saving
 - **WHEN** the user cancels the administrator key handoff during immediate apply
-- **THEN** desired configuration remains saved and no image preparation or installation occurs
+- **THEN** desired configuration remains saved, prepared images and the running Core remain available, and no administrator is initialized
 - **AND** `ams apply` can retry without configuration questions
 
 #### Scenario: Exit after installation starts
@@ -157,7 +157,7 @@ Setup SHALL generate one Compose project containing exactly the selected applica
 
 ### Requirement: Automatic image preparation
 
-Setup SHALL manage image records internally without asking for a manifest path. After approval and administrator key handoff where applicable, it SHALL verify reusable local images and build missing required images from pinned sources for the actual selected engine architecture. It SHALL preserve content identity and platform validation, and reject malformed records explicitly. Back navigation SHALL end before preparation begins. Existing installed image records SHALL remain available to the configuration snapshot before replacement.
+Setup SHALL manage image records internally without asking for a manifest path. After approval it SHALL verify reusable local images and build missing required images from pinned sources for the actual selected engine architecture. It SHALL preserve content identity and platform validation, and reject malformed records explicitly. Back navigation SHALL end before preparation begins. Existing installed image records SHALL remain available to the configuration snapshot before replacement.
 
 #### Scenario: First installation without image records
 - **WHEN** the user confirms installation in a directory without an image manifest
@@ -175,7 +175,7 @@ Setup SHALL manage image records internally without asking for a manifest path. 
 - **AND** unused recorded images are preserved without requiring them in the local engine
 
 #### Scenario: Cancel before image preparation
-- **WHEN** the user declines immediate application or cancels administrator key handoff
+- **WHEN** the user declines immediate application
 - **THEN** setup performs no image preparation or runtime configuration writes
 - **AND** desired configuration saved before the apply choice remains available
 
@@ -192,21 +192,25 @@ Setup SHALL save reviewed desired configuration before asking `Apply configurati
 
 The CLI SHALL provide `ams apply` without a server or path argument or repeated configuration questions. The Apply configuration menu action SHALL invoke the same saved-target application workflow and SHALL NOT run the Configure stack detection guard. It SHALL remember the absolute server installation location for the current OS user and use that location independently of the calling working directory. Missing or invalid saved configuration SHALL fail with actionable guidance. Immediate and deferred application SHALL use the same implementation and read current saved settings. The remembered target SHALL remain a convenience reference rather than an installation claim.
 
-Before choosing the bootstrap mode for local Core, apply SHALL inspect application-container presence in the exact saved project and configured engine. When every configured application service has a container, including stopped containers, apply SHALL skip administrator questions and use the established existing-state bootstrap check without initialization or repair. Otherwise, local Core SHALL retain the initial generated/manual key and handoff flow. Required initial keys SHALL remain transient and SHALL NOT be persisted. Folder presence or applied inventory SHALL NOT select an existing-administrator-key prompt. Check failure SHALL NOT trigger fresh administrator creation or automatic recovery.
+After local Core becomes healthy, apply SHALL check for an active administrator through the existing bootstrap check. A successful check SHALL preserve the administrator and skip key generation and initialization regardless of application-container completeness. Only the explicit setup-required exit status SHALL invoke automatic key generation and the interactive handoff. Other check failures SHALL stop application without replacing credentials. Initial keys SHALL remain transient and SHALL NOT be persisted by setup. There SHALL be no manual administrator-key question.
 
 #### Scenario: Apply edited server settings later
-- **WHEN** the user edits saved .env and runs ams apply with all configured application containers present
-- **THEN** apply regenerates derived configuration and recreates containers using current settings without requesting an administrator key or reinitializing Core
-- **AND** the existing-state bootstrap check runs, valid images are reused, and previous applied configuration remains available
+- **WHEN** the user edits saved .env and runs ams apply against initialized Core
+- **THEN** apply regenerates derived configuration and recreates containers without requesting or replacing the administrator key
+- **AND** valid images are reused and previous applied configuration remains available
 
 #### Scenario: Apply deferred first installation
-- **WHEN** saved configuration owns local Core and its configured application container set is incomplete
-- **THEN** apply retains the initial generated/manual administrator-key and handoff flow
-- **AND** it does not infer administrator state from folders or saved inventory
+- **WHEN** healthy local Core reports that initial setup is required
+- **THEN** apply automatically generates a key and displays it with a single OK acknowledgement before administrator creation
+- **AND** initialization receives that key only through stdin
+
+#### Scenario: Resume a partial installation
+- **WHEN** only part of the configured stack exists but Core already has an active administrator
+- **THEN** apply starts the remaining services without key generation or administrator reinitialization
 
 #### Scenario: Existing-state check fails
-- **WHEN** a complete configured container group exists but its established bootstrap check fails
-- **THEN** apply reports the failure and preserves the existing administrator credential without attempting initialization or repair
+- **WHEN** the Core check fails for a reason other than its explicit setup-required status
+- **THEN** apply reports the failure without generating a key or attempting initialization or repair
 
 #### Scenario: Selected CLIProxyAPI account is already configured
 - **WHEN** local CLIProxyAPI has a non-disabled saved authorization record matching CLIPROXY_AUTH_PROVIDER with an access or refresh credential

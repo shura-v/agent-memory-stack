@@ -7,6 +7,8 @@ export interface Interaction {
   multiselect<T extends string>(id: string, message: string, options: { value: T; label: string }[], initial: T[]): Promise<T[]>;
   confirm(id: string, message: string, initial?: boolean): Promise<boolean>;
   note(message: string, title?: string): void;
+  /** Explicit copyable output; never used by automatic apply logs for secrets. */
+  print(message: string): void;
   handoff(key: string): Promise<void>;
   /** Reuse generated values and read-only lookups while navigating questions. */
   memo?<T>(id: string, create: () => T, dependencies?: readonly unknown[]): T;
