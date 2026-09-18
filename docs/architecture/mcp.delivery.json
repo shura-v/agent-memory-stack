@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/super/git/agent-memory-stack/docs/architecture/mcp.json",
+  "output": "/Users/super/git/agent-memory-stack/docs/architecture/mcp.html",
+  "specification": {
+    "sha256": "ace6300906a4458a0db6b5bec155dae9dc8b15ea82ed515fa7e4c63d39d47569",
+    "bytes": 6294
+  },
+  "artifact": {
+    "sha256": "4c74cc54dc5dbd8c5b080a5ee00999b6906a6697f5de89d8059497fb18f1518f",
+    "bytes": 716059
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  },
+  "evidence": {
+    "verified": true,
+    "repository": "https://github.com/shura-v/agent-memory-stack",
+    "revision": "bd6782f3dbaa81877d05e19cac56e7e5e69c9834",
+    "references": 12
+  }
+}

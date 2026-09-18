@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/super/git/agent-memory-stack/docs/architecture/stack.json",
+  "output": "/Users/super/git/agent-memory-stack/docs/architecture/stack.html",
+  "specification": {
+    "sha256": "bbb44ff74447a7e81f049c529f694237009399b3af4f44b09d68cda7f22f9184",
+    "bytes": 6499
+  },
+  "artifact": {
+    "sha256": "daa7b25040b4caed403213e18951b6316369d64c90d2c8bed3723a420485f5be",
+    "bytes": 718690
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  },
+  "evidence": {
+    "verified": true,
+    "repository": "https://github.com/shura-v/agent-memory-stack",
+    "revision": "bd6782f3dbaa81877d05e19cac56e7e5e69c9834",
+    "references": 10
+  }
+}

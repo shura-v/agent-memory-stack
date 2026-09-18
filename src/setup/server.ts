@@ -20,6 +20,7 @@ import { saveResolvedNetwork } from './network-settings.js';
 import { accountProviders } from '../config/providers.js';
 import type { AccountProvider } from '../config/providers.js';
 import type { ServiceInterface } from '../deployment/model.js';
+import { displayHomePath, expandHomePath } from './paths.js';
 
 function interfaceDescription(item: ServiceInterface): string {
   if (item.service === 'mcp') return `MCP: 127.0.0.1:${item.port}/mcp (Knowledge tools, Streamable HTTP)`;
@@ -67,7 +68,8 @@ export async function setupServer(ui: Interaction, options: ServerSetupOptions =
   const targets = options.targets ?? targetStore;
   const previous = await targets.recall('server');
   ui.note('AMS saves compose.yaml and .env in this directory. Services run in Docker/Podman containers.', 'Compose configuration');
-  const directory = resolve(await ui.text({ id: 'directory', message: 'Compose configuration directory', initial: previous ?? resolve(options.cwd ?? process.cwd(), 'ams') }));
+  const inputDirectory = await ui.text({ id: 'directory', message: 'Compose configuration directory', initial: previous ? displayHomePath(previous) : './ams' });
+  const directory = resolve(options.cwd ?? process.cwd(), expandHomePath(inputDirectory));
   const existing = await readEnv(join(directory, '.env'));
   const services = await selectServices(ui, existing);
   const provider = await ui.select<Provider>('provider', 'Container engine / Compose provider', [
@@ -83,14 +85,14 @@ export async function setupServer(ui: Interaction, options: ServerSetupOptions =
     `${name}: ${connection.mode}${connection.mode === 'remote' ? ` (${connection.endpoint ?? connection.origin})` : ''}`);
   const interfaces = plan.interfaces.map(interfaceDescription);
   ui.note(`Local services: ${plan.services.join(', ')}\nRequired helpers: ${plan.helpers.join(', ')}\nAdded containers: ${added.join(', ') || 'none'}\nRemoved containers: ${removed.join(', ') || 'none'}\n${connections.join('\n')}\n${interfaces.join('\n')}\nExisting data and local credentials are retained. Changing placement does not migrate data or operate another machine.`, 'Review deployment');
-  ui.note(reviewSettings(env), 'Review configuration (secrets redacted)');
+  ui.note(reviewSettings({ ...env, DATA_DIR: displayHomePath(env.DATA_DIR) }), 'Review configuration (secrets redacted)');
   ui.note('Setup will reuse matching local images and build missing or outdated images for the configured services. The first build downloads pinned sources and dependencies. Image records are managed automatically.', 'Container images');
   ui.commit?.();
   await preserveInputs(directory);
   await atomicWrite(join(directory, '.env'), encodeEnv(env));
   await atomicWrite(join(directory, '.ams/runtime.json'), JSON.stringify({ provider }, null, 2) + '\n');
   await targets.remember('server', directory);
-  ui.note(`Configuration saved in ${directory}.\nApply it later with: ams apply`, 'Configuration saved');
+  ui.note(`Configuration saved in ${displayHomePath(directory)}.\nApply it later with: ams apply`, 'Configuration saved');
   if (await ui.confirm('apply', 'Apply configuration now?', true)) await applyServer(ui, directory, options);
 }
 

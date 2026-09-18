@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Inside the AMS MCP bridge",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      860
+    ],
+    "repository": {
+      "url": "https://github.com/shura-v/agent-memory-stack",
+      "revision": "bd6782f3dbaa81877d05e19cac56e7e5e69c9834"
+    }
+  },
+  "components": [
+    {
+      "id": "mcp_client",
+      "type": "external",
+      "label": "Agent MCP client",
+      "sublabel": "Memory-user API key",
+      "pos": [
+        30,
+        100
+      ],
+      "size": [
+        220,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/mcp-gateway.ts",
+          "line": 144
+        }
+      ]
+    },
+    {
+      "id": "http_gateway",
+      "type": "security",
+      "label": "AMS HTTP gateway",
+      "sublabel": "User checks + session ownership",
+      "tag": ":8425 /mcp",
+      "pos": [
+        370,
+        100
+      ],
+      "size": [
+        230,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/mcp-gateway.ts",
+          "line": 136
+        },
+        {
+          "path": "src/runtime/user-auth.ts",
+          "line": 26
+        }
+      ]
+    },
+    {
+      "id": "supergateway",
+      "type": "backend",
+      "label": "Supergateway",
+      "sublabel": "Worker per user + credential",
+      "tag": "Private HTTP listener",
+      "pos": [
+        740,
+        100
+      ],
+      "size": [
+        230,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/mcp-workers.ts",
+          "line": 18
+        }
+      ]
+    },
+    {
+      "id": "adapter",
+      "type": "backend",
+      "label": "AMS MCP adapter",
+      "sublabel": "Child process per MCP session",
+      "tag": "Two Knowledge tools",
+      "pos": [
+        1110,
+        100
+      ],
+      "size": [
+        230,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/mcp-adapter.ts",
+          "line": 80
+        },
+        {
+          "path": "src/runtime/mcp-workers.ts",
+          "line": 91
+        }
+      ]
+    },
+    {
+      "id": "core_identity",
+      "type": "backend",
+      "label": "Core",
+      "sublabel": "Users, teams, assets and ACL",
+      "pos": [
+        740,
+        420
+      ],
+      "size": [
+        230,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/user-auth.ts",
+          "line": 26
+        },
+        {
+          "path": "src/runtime/access-gateway.ts",
+          "line": 83
+        }
+      ]
+    },
+    {
+      "id": "access_gate",
+      "type": "security",
+      "label": "AMS access gateway",
+      "sublabel": "User, resource, team and ACL",
+      "tag": "access:8080",
+      "pos": [
+        1110,
+        650
+      ],
+      "size": [
+        230,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/access-gateway.ts",
+          "line": 60
+        }
+      ]
+    },
+    {
+      "id": "service_boundary",
+      "type": "security",
+      "label": "Knowledge service",
+      "sublabel": "Service key + identity boundary",
+      "tag": "knowledge-service:8423",
+      "pos": [
+        740,
+        650
+      ],
+      "size": [
+        230,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/knowledge-service.ts",
+          "line": 12
+        }
+      ]
+    },
+    {
+      "id": "knowledge_tools",
+      "type": "backend",
+      "label": "TDAI Knowledge",
+      "sublabel": "Wiki and code resource tools",
+      "tag": "knowledge:8421",
+      "pos": [
+        370,
+        650
+      ],
+      "size": [
+        230,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/knowledge-service.ts",
+          "line": 12
+        },
+        {
+          "path": "src/config/services.ts",
+          "line": 59
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "mcp container · session processes stay private",
+      "wraps": [
+        "http_gateway",
+        "supergateway",
+        "adapter"
+      ],
+      "pad": 25
+    }
+  ],
+  "connections": [
+    {
+      "id": "public_mcp",
+      "from": "mcp_client",
+      "to": "http_gateway",
+      "label": "Streamable HTTP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "private_mcp",
+      "from": "http_gateway",
+      "to": "supergateway",
+      "label": "Private HTTP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "stdio_bridge",
+      "from": "supergateway",
+      "to": "adapter",
+      "label": "MCP over stdio",
+      "variant": "emphasis"
+    },
+    {
+      "id": "adapter_http",
+      "from": "adapter",
+      "to": "access_gate",
+      "label": "HTTP tools + user key",
+      "variant": "emphasis",
+      "labelAt": [
+        1225,
+        202
+      ]
+    },
+    {
+      "id": "gateway_verify",
+      "from": "http_gateway",
+      "to": "core_identity",
+      "label": "Verify user",
+      "variant": "security"
+    },
+    {
+      "id": "resource_authorization",
+      "from": "access_gate",
+      "to": "core_identity",
+      "label": "Check permissions",
+      "variant": "security"
+    },
+    {
+      "id": "service_auth",
+      "from": "access_gate",
+      "to": "service_boundary",
+      "label": "Service key",
+      "variant": "emphasis",
+      "labelAt": [
+        1040,
+        735
+      ]
+    },
+    {
+      "id": "knowledge_dispatch",
+      "from": "service_boundary",
+      "to": "knowledge_tools",
+      "label": "Local HTTP",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Tool contract",
+      "items": [
+        "list_knowledge_tools and call_knowledge_tool",
+        "Both require knowledge_id from Panel. Calls use the listed tool schema."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Checks before execution",
+      "items": [
+        "The HTTP gateway verifies user status and the Core–Knowledge pairing.",
+        "Access rechecks the user, resource ACL and active team membership."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Session lifecycle",
+      "items": [
+        "Unused failed workers are evicted; lost sessions return 404.",
+        "A full MCP container restart discards the pool and sessions. Clients reinitialize."
+      ]
+    }
+  ]
+}

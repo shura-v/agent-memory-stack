@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "diagrams": [
+    {
+      "name": "stack",
+      "diagram_type": "architecture",
+      "output": "stack.html",
+      "specification_sha256": "bbb44ff74447a7e81f049c529f694237009399b3af4f44b09d68cda7f22f9184",
+      "artifact_sha256": "daa7b25040b4caed403213e18951b6316369d64c90d2c8bed3723a420485f5be",
+      "validation": {
+        "checksPassed": 9,
+        "checkCount": 9,
+        "compositionProfile": "showcase",
+        "compositionStatus": "pass",
+        "errors": 0,
+        "warnings": 0
+      },
+      "visual_review": "passed",
+      "correction_rounds": 1,
+      "manually_inspected_screenshots": [
+        "stack.visual-check.1440x900.dark.png",
+        "stack.visual-check.2048x1320.light.png"
+      ],
+      "automated_containment": [
+        {
+          "width": 1440,
+          "height": 900,
+          "passed": true
+        },
+        {
+          "width": 1600,
+          "height": 1000,
+          "passed": true
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "passed": true
+        },
+        {
+          "width": 2048,
+          "height": 1320,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "Default READ view with motion disabled.",
+        "Inspected node and card fit, labels, route corridors, themes, and overall composition.",
+        "No clipping or overlapping labels observed. Small-screen details can be enlarged with viewer zoom."
+      ]
+    },
+    {
+      "name": "mcp",
+      "diagram_type": "architecture",
+      "output": "mcp.html",
+      "specification_sha256": "ace6300906a4458a0db6b5bec155dae9dc8b15ea82ed515fa7e4c63d39d47569",
+      "artifact_sha256": "4c74cc54dc5dbd8c5b080a5ee00999b6906a6697f5de89d8059497fb18f1518f",
+      "validation": {
+        "checksPassed": 9,
+        "checkCount": 9,
+        "compositionProfile": "showcase",
+        "compositionStatus": "pass",
+        "errors": 0,
+        "warnings": 0
+      },
+      "visual_review": "passed",
+      "correction_rounds": 1,
+      "manually_inspected_screenshots": [
+        "mcp.visual-check.1440x900.dark.png",
+        "mcp.visual-check.2048x1320.light.png"
+      ],
+      "automated_containment": [
+        {
+          "width": 1440,
+          "height": 900,
+          "passed": true
+        },
+        {
+          "width": 1600,
+          "height": 1000,
+          "passed": true
+        },
+        {
+          "width": 1920,
+          "height": 1080,
+          "passed": true
+        },
+        {
+          "width": 2048,
+          "height": 1320,
+          "passed": true
+        }
+      ],
+      "notes": [
+        "Default READ view with motion disabled.",
+        "Inspected node and card fit, labels, route corridors, themes, and overall composition.",
+        "No clipping or overlapping labels observed. Small-screen details can be enlarged with viewer zoom."
+      ]
+    }
+  ],
+  "scope": "Documentation and rendered composition only; no application or live deployment validation performed."
+}

@@ -6,6 +6,7 @@ import { remember } from './interaction.js';
 import { discoverModels, ModelAccessError } from './model-discovery.js';
 import type { ModelDiscovery } from './model-discovery.js';
 import { accountProviders } from '../config/providers.js';
+import { displayHomePath, expandHomePath } from './paths.js';
 
 export async function selectServices(ui: Interaction, existing: Record<string, string>): Promise<Service[]> {
   const plan = resolveDeployment(existing, { requireConnections: false });
@@ -29,6 +30,13 @@ export async function serverQuestions(ui: Interaction, existing: Record<string, 
   for (const field of fields.filter(field => plan.fields.includes(field.name) && setupFields.has(field.name))) {
     const previous = existing[field.name];
     const initial = previous ?? field.default;
+    if (field.name === 'DATA_DIR') {
+      const value = await ui.text({ id: field.name, message: field.label,
+        initial: initial === undefined ? undefined : displayHomePath(initial),
+        validate: value => validateField(field, expandHomePath(value)) });
+      values[field.name] = expandHomePath(value);
+      continue;
+    }
     if (field.role) {
       values[field.name] = previous || remember(ui, `key:${field.name}`, () => generateKey(field.role!));
       continue;

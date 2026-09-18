@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Agent Memory Stack",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      890
+    ],
+    "repository": {
+      "url": "https://github.com/shura-v/agent-memory-stack",
+      "revision": "bd6782f3dbaa81877d05e19cac56e7e5e69c9834"
+    }
+  },
+  "components": [
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "Your agent",
+      "sublabel": "Codex / Claude Code",
+      "pos": [
+        33,
+        335
+      ],
+      "size": [
+        235,
+        88
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "memoryproxy",
+      "type": "backend",
+      "label": "MemoryProxy",
+      "sublabel": "Agent API + memory context",
+      "tag": "127.0.0.1:8096",
+      "pos": [
+        371,
+        80
+      ],
+      "size": [
+        235,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/config/services.ts",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "cliproxy",
+      "type": "backend",
+      "label": "CLIProxyAPI",
+      "sublabel": "Provider account access",
+      "pos": [
+        732,
+        80
+      ],
+      "size": [
+        235,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/config/providers.ts",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "provider",
+      "type": "external",
+      "label": "Agent model provider",
+      "sublabel": "ChatGPT / Claude / others",
+      "pos": [
+        1093,
+        80
+      ],
+      "size": [
+        245,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/config/providers.ts",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "panel",
+      "type": "frontend",
+      "label": "Panel",
+      "sublabel": "Users, keys and resources",
+      "tag": "127.0.0.1:8123",
+      "pos": [
+        371,
+        340
+      ],
+      "size": [
+        235,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/config/services.ts",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "Core",
+      "sublabel": "Memory + identity + permissions",
+      "pos": [
+        732,
+        340
+      ],
+      "size": [
+        245,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/config/services.ts",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "internal_llm",
+      "type": "external",
+      "label": "Internal LLM API",
+      "sublabel": "Core / Knowledge models",
+      "pos": [
+        1093,
+        340
+      ],
+      "size": [
+        245,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/config/services.ts",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "security",
+      "label": "AMS MCP gateway",
+      "sublabel": "Streamable HTTP /mcp",
+      "tag": "127.0.0.1:8425",
+      "pos": [
+        371,
+        650
+      ],
+      "size": [
+        235,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/mcp-gateway.ts",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "access",
+      "type": "security",
+      "label": "Knowledge access",
+      "sublabel": "User + team + resource ACL",
+      "pos": [
+        732,
+        650
+      ],
+      "size": [
+        245,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/access-gateway.ts",
+          "label": "Implementation"
+        }
+      ]
+    },
+    {
+      "id": "knowledge",
+      "type": "backend",
+      "label": "Knowledge",
+      "sublabel": "Wiki and code tools",
+      "pos": [
+        1093,
+        650
+      ],
+      "size": [
+        245,
+        88
+      ],
+      "sources": [
+        {
+          "path": "src/config/services.ts",
+          "label": "Implementation"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "agent-model-api",
+      "from": "agent",
+      "to": "memoryproxy",
+      "label": "Base URL + user key",
+      "variant": "emphasis"
+    },
+    {
+      "id": "proxy-provider-api",
+      "from": "memoryproxy",
+      "to": "cliproxy",
+      "label": "Inference",
+      "variant": "emphasis"
+    },
+    {
+      "id": "provider-request",
+      "from": "cliproxy",
+      "to": "provider",
+      "label": "Account auth",
+      "variant": "emphasis"
+    },
+    {
+      "id": "memory-read-write",
+      "from": "memoryproxy",
+      "to": "core",
+      "label": "Read / write memory"
+    },
+    {
+      "id": "panel-admin",
+      "from": "panel",
+      "to": "core",
+      "label": "Admin API",
+      "labelAt": [
+        660,
+        418
+      ]
+    },
+    {
+      "id": "core-model",
+      "from": "core",
+      "to": "internal_llm",
+      "label": "Memory processing"
+    },
+    {
+      "id": "agent-mcp",
+      "from": "agent",
+      "to": "mcp",
+      "label": "MCP + user key",
+      "variant": "security"
+    },
+    {
+      "id": "mcp-tool-api",
+      "from": "mcp",
+      "to": "access",
+      "label": "Knowledge tool calls",
+      "variant": "security"
+    },
+    {
+      "id": "acl-check",
+      "from": "access",
+      "to": "core",
+      "label": "Authorize",
+      "variant": "security"
+    },
+    {
+      "id": "authorized-tool",
+      "from": "access",
+      "to": "knowledge",
+      "label": "Authorized HTTP"
+    },
+    {
+      "id": "knowledge-model",
+      "from": "knowledge",
+      "to": "internal_llm",
+      "label": "Wiki processing"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Two independent connections",
+      "items": [
+        "MemoryProxy supplies the agent's model API with memory.",
+        "MCP exposes Knowledge tools; it is not the model endpoint."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "One machine or a VPS",
+      "items": [
+        "Default ports bind only to localhost; setup can choose free ports.",
+        "Locally use localhost. Remotely use your own Caddy with paths preserved."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Management and deployment",
+      "items": [
+        "Panel also manages Knowledge through knowledge-service.",
+        "AMS prepares Compose, images and keys; Core and Knowledge have separate model selections."
+      ]
+    }
+  ]
+}

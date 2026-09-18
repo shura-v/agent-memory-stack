@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import { setupServer as runSetupServer } from '../dist/setup/server.js';
 import { serverQuestions as askServerQuestions, selectServices } from '../dist/setup/questions.js';
@@ -56,6 +56,43 @@ test('questions retain operational fields and preserve advanced settings without
   assert.ok(!ui.asked.some(id => /CORE_API_KEY|CLIPROXY_API_KEY/.test(id)));
   assert.ok(!ui.asked.some(id => /_PORT$|_PUBLIC_URL$|_MODE$|_ENABLED$|^REMOTE_/.test(id) && id !== 'MEMORY_PROMPT_MODE'));
   assert.match(ui.notes.join('\n'), /Other interfaces stay private/);
+});
+test('setup defaults to ./ams and saves an absolute target relative to its working directory', async t => {
+  const cwd = await fixture(t);
+  let remembered;
+  const ui = interaction({ apply: false });
+  await setupServer(ui, { cwd, targets: { recall: async () => undefined, remember: async (_target, path) => { remembered = path; } } });
+  assert.equal(ui.questions.find(q => q.id === 'directory').initial, './ams');
+  assert.equal(remembered, join(cwd, 'ams'));
+  assert.equal((await readEnv(join(remembered, '.env'))).DATA_DIR, './data');
+});
+test('setup shows a remembered home path in shorthand before consuming answers', async () => {
+  const ui = interaction();
+  ui.text = async q => {
+    assert.equal(q.id, 'directory');
+    assert.equal(q.initial, '~/ams');
+    throw new Cancelled();
+  };
+  await assert.rejects(setupServer(ui, { targets: { recall: async () => join(homedir(), 'ams'), remember: async () => assert.fail('cancelled') } }), Cancelled);
+});
+test('setup expands home input before writing and shows data paths in shorthand in review', async t => {
+  const directory = await fixture(t);
+  const destination = join(directory, 'server');
+  let remembered;
+  const ui = interaction({ directory: `~/${relative(homedir(), destination)}`, DATA_DIR: '~/ams/data', apply: false });
+  await setupServer(ui, { targets: { recall: async () => undefined, remember: async (_target, path) => { remembered = path; } } });
+  assert.equal(remembered, destination);
+  assert.equal((await readEnv(join(destination, '.env'))).DATA_DIR, join(homedir(), 'ams', 'data'));
+  assert.ok(ui.notes.some(note => note.includes('DATA_DIR: ~/ams/data')));
+  assert.ok(!ui.notes.some(note => note.includes(settings.LLM_API_KEY)));
+});
+test('data path prompts shorten saved home paths and retain relative installation paths', async () => {
+  for (const [path, displayed] of [[homedir(), '~'], [join(homedir(), 'ams', 'data'), '~/ams/data'], ['./data', './data']]) {
+    const ui = interaction({ useDefaults: true });
+    const env = await serverQuestions(ui, { ...settings, DATA_DIR: path });
+    assert.equal(ui.questions.find(q => q.id === 'DATA_DIR').initial, displayed);
+    assert.equal(env.DATA_DIR, path);
+  }
 });
 test('CLIProxyAPI account provider defaults to Codex, offers Claude and preserves its saved choice', async () => {
   for (const provider of ['codex', 'claude']) {
