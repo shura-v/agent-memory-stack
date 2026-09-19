@@ -66,7 +66,13 @@ AMS runs the MCP HTTP-to-stdio bridge on the server and checks the caller's user
 
 ## 🚀 Start setup
 
-You need **Node.js 24+** and **Docker or Podman with Compose** on the machine that will run the stack.
+### Prerequisites
+
+- **Node.js 24+ with npm** to install and run `ams`.
+- **Docker with Docker Compose**, or **Podman** with configured `podman compose`, `podman-compose`, or `uvx podman-compose`.
+- **`tar` on `PATH`** to unpack the verified TDAI source archive and offline bundles.
+- **Outbound internet access for the default first setup and image build** to download the npm package, TDAI source, container base images, and build dependencies. A prepared offline bundle covers the TDAI source and images after AMS itself is installed.
+- **An active ChatGPT (Codex) or Claude account with access to the selected models** when using the stack's CLIProxyAPI. External mode instead requires a compatible API base URL, API key, and models. Account login needs a browser on any machine that can open the displayed URL; a VPS needs no local browser or inbound callback port.
 
 ```sh
 npm install -g agent-memory-stack

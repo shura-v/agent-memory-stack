@@ -4,7 +4,7 @@ For an overview and a quick start, see the [README](../README.md). For source bu
 
 ## 🚀 1. Start setup
 
-Install Node.js 24+ and npm to configure the stack. Server application also requires Docker or Podman with Compose. Fresh installations use the pinned sources in the packaged `vendor/upstream.lock.json`; a separate TencentDB checkout is unnecessary.
+Install Node.js 24+ with npm and make `tar` available on `PATH`. Server application also requires Docker with Docker Compose, or Podman with configured `podman compose`, `podman-compose`, or `uvx podman-compose`. The default first setup and image build need outbound access for the npm package, TDAI source, base images, and build dependencies; a prepared offline bundle supplies the TDAI source and images after AMS itself is installed. Using the stack's CLIProxyAPI requires an active ChatGPT (Codex) or Claude account with access to the selected models. External mode instead requires a compatible API base URL, API key, and models. Provider login needs a browser that can open the displayed URL, but a VPS needs no local browser or inbound callback port. Fresh installations use the pinned sources in the packaged `vendor/upstream.lock.json`; a separate TencentDB checkout is unnecessary.
 
 To update TDAI on this server, run `ams update tdai`. It downloads the latest `feat/server_team` revision and rebuilds/applies the saved installation. The selected revision lives in its `.ams/tdai-source.json`; the npm package is unchanged. See [Updating TDAI](updating-tdai.md).
 
