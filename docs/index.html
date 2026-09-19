@@ -53,6 +53,7 @@
         font-size: 0.9rem;
       }
       .brand { font-weight: 750; letter-spacing: -0.02em; }
+      .header-links { display: flex; gap: 20px; }
       .hero { max-width: 790px; padding-block: 66px 44px; }
       .eyebrow {
         margin: 0 0 18px;
@@ -104,7 +105,10 @@
   <body>
     <header class="container">
       <span class="brand">Agent Memory Stack</span>
-      <a href="https://github.com/shura-v/agent-memory-stack">GitHub <span aria-hidden="true">↗</span></a>
+      <nav class="header-links" aria-label="Project links">
+        <a href="https://www.npmjs.com/package/agent-memory-stack">npm <span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/shura-v/agent-memory-stack">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
     </header>
 
     <main class="container">
