@@ -1,6 +1,12 @@
 # 🧠 Agent Memory Stack
 
+[![npm version](https://img.shields.io/npm/v/agent-memory-stack.svg)](https://www.npmjs.com/package/agent-memory-stack)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-2857c7.svg)](https://shura-v.github.io/agent-memory-stack/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/shura-v/agent-memory-stack/main/LICENSE)
+
 **Your AI subscription, with a memory stack you run yourself.**
+
+[![Agent Memory Stack architecture](https://raw.githubusercontent.com/shura-v/agent-memory-stack/main/docs/images/agent-memory-stack-overview.png)](https://shura-v.github.io/agent-memory-stack/architecture/stack.html)
 
 Agent Memory Stack (AMS) brings TencentDB Agent Memory together with CLIProxyAPI and a remote MCP server. Give your coding agent persistent memory, reusable skills, and access to project knowledge while using your existing model accounts. Run the stack on your laptop or a VPS, and keep working in Codex, Claude Code, or another compatible agent.
 
@@ -18,6 +24,12 @@ Agent Memory Stack (AMS) brings TencentDB Agent Memory together with CLIProxyAPI
 - **Your model accounts, connected.** CLIProxyAPI connects the agent's model requests to supported providers. AMS includes account login for ChatGPT (Codex) and Claude.
 - **MCP that can live on your server.** Connect to Knowledge over authenticated Streamable HTTP. The stdio bridge runs inside the stack, so your agent connects with an MCP URL and a user key.
 
+## 🚀 Setup
+
+Run `ams`, choose your model account and models, then apply the saved stack on your laptop or VPS. The wizard can save everything before Docker or Podman is ready. Follow the [setup guide](https://shura-v.github.io/agent-memory-stack/#setup-title) when you are ready to start.
+
+[![Interactive Agent Memory Stack setup](https://raw.githubusercontent.com/shura-v/agent-memory-stack/main/docs/images/agent-memory-stack-setup.gif)](https://shura-v.github.io/agent-memory-stack/#setup-title)
+
 ## 🔗 Bring your subscription and choose your memory models
 
 The core idea is simple: **combine TencentDB's memory and knowledge with the model access you already have.** Every installation runs all six services—Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI, and MCP—in one Compose project, with a web panel for users, keys, and resources.
@@ -33,20 +45,7 @@ With the default local route, setup can save configuration before Docker/Podman 
 
 ## 🗺️ How it fits together
 
-```mermaid
-flowchart LR
-  Agent --> MemoryProxy --> CLIProxyAPI
-  MemoryProxy --> Core
-  Agent --> AMS[AMS HTTP MCP] --> Stock[Stock TDAI stdio MCP]
-  Stock --> Access[AMS access] --> Knowledge
-  AMS --> Core
-  Access --> Core
-  Panel --> Core
-  Panel --> Knowledge
-  Knowledge --> Panel
-```
-
-All six applications run together. Core and Knowledge use either CLIProxyAPI or your configured external model API. The [architecture guide](docs/architecture/README.md) maps the current services, configuration lifecycle, and MCP boundary.
+The architecture screenshot at the top comes directly from the delivered interactive stack map. All six applications run together. Core and Knowledge use either CLIProxyAPI or your configured external model API. The [architecture guide](docs/architecture/README.md) maps the current services, configuration lifecycle, and MCP boundary.
 
 AMS runs the selected TDAI revision unchanged, including upstream defects. In the pinned revision, Proxy user verification omits the service Bearer required by Core; model requests can fail even when all containers are healthy. See [validation](VALIDATION.md).
 

@@ -85,7 +85,9 @@
       .card p { margin: 0 0 25px; color: var(--muted); }
       .card-action { margin-top: auto; font-weight: 650; }
       figure { margin: 0 0 44px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; }
+      figure a { display: block; }
       figure img { display: block; width: 100%; height: auto; border-radius: 9px; }
+      .setup-demo img { max-width: 800px; margin-inline: auto; }
       figcaption { padding: 13px 8px 4px; color: var(--muted); font-size: 0.85rem; }
       .guides { padding-bottom: 40px; }
       .guide-links { display: flex; flex-wrap: wrap; gap: 12px 28px; }
@@ -113,6 +115,18 @@
         <p class="intro">Bring persistent memory, reusable skills, Wiki and CodeGraph to your coding agent. Connect your existing model accounts and access project knowledge through remote MCP, from your laptop or your own server.</p>
       </section>
 
+      <figure class="setup-demo">
+        <img src="images/agent-memory-stack-setup.gif" alt="Interactive Agent Memory Stack setup in a terminal." loading="eager">
+        <figcaption>Configure the complete stack interactively, save the native settings, and apply them when the container engine is ready.</figcaption>
+      </figure>
+
+      <figure>
+        <a href="architecture/stack.html">
+          <img src="images/agent-memory-stack-overview.png" alt="Agent Memory Stack overview: MemoryProxy and MCP are separate agent connections; Core and Knowledge choose shared CLIProxyAPI or an external model API." loading="eager">
+        </a>
+        <figcaption>Two agent connections: MemoryProxy for model requests with memory, and MCP for Knowledge tools. Open the image to explore the interactive stack map.</figcaption>
+      </figure>
+
       <section class="diagrams" aria-labelledby="diagrams-title">
         <h2 id="diagrams-title">Explore the architecture</h2>
         <div class="cards">
@@ -130,11 +144,6 @@
           </a>
         </div>
       </section>
-
-      <figure>
-        <img src="images/agent-memory-stack-overview.png" alt="Agent Memory Stack overview: MemoryProxy and MCP are separate agent connections; Core and Knowledge choose shared CLIProxyAPI or an external model API." loading="lazy">
-        <figcaption>Two agent connections: MemoryProxy for model requests with memory, and MCP for Knowledge tools. Internal models share CLIProxyAPI by default or use a separate external API.</figcaption>
-      </figure>
 
       <section aria-labelledby="setup-title">
         <h2 id="setup-title">Set up your stack</h2>
