@@ -1,7 +1,7 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { atomicWrite, encodeEnv, readEnv } from '../config/files.js';
-import { generateKey, reviewSettings, validateEnv } from '../config/settings.js';
+import { fields, generateKey, reviewSettings, validateEnv } from '../config/settings.js';
 import { resolveDeployment } from '../deployment/model.js';
 import { readAppliedInventory, runtimeFor } from '../runtime/compose.js';
 import { imageVariables, renderCompose } from '../runtime/render-compose.js';
@@ -9,18 +9,17 @@ import type { DeploymentRuntime, Provider } from '../runtime/compose.js';
 import type { ImageService } from '../build/images.js';
 import { Cancelled } from './interaction.js';
 import type { Interaction } from './interaction.js';
-import { selectServices, serverQuestions } from './questions.js';
+import { selectServices, serverQuestions, selectModel } from './questions.js';
 import type { ModelDiscovery } from './model-discovery.js';
 import { prepareImages } from './images.js';
 import { DeploymentError, PortBindingConflict } from '../runtime/errors.js';
-import { targetStore } from './targets.js';
-import type { TargetStore } from './targets.js';
 import { captureInputs, exists, preserveInputs, recordAppliedInputs, restoreSnapshotInputs } from './server-settings.js';
 import { saveResolvedNetwork } from './network-settings.js';
 import { accountProviders } from '../config/providers.js';
 import type { AccountProvider } from '../config/providers.js';
 import type { ServiceInterface } from '../deployment/model.js';
-import { displayHomePath, expandHomePath } from './paths.js';
+import { internalModelFields, usesLocalInternalModels } from '../config/internal-llm.js';
+import { configurationDirectory, displayHomePath } from './paths.js';
 
 function interfaceDescription(item: ServiceInterface): string {
   if (item.service === 'mcp') return `MCP: 127.0.0.1:${item.port}/mcp (Knowledge tools, Streamable HTTP)`;
@@ -34,23 +33,11 @@ async function appliedServices(directory: string, existing: Record<string, strin
   return inventory?.services ?? (Object.keys(existing).length ? resolveDeployment(existing, { requireConnections: false }).containers : []);
 }
 
-function withAccountProvider(source: string, provider: AccountProvider): string {
-  const assignment = `CLIPROXY_AUTH_PROVIDER=${provider}`;
-  let found = false;
-  const updated = source.replace(/^CLIPROXY_AUTH_PROVIDER=([^\r\n]*)/gm, (_line, value: string) => {
-    found = true;
-    const comment = /([ \t]+#[^\r\n]*)$/.exec(value)?.[1] ?? '';
-    return assignment + comment;
-  });
-  return found ? updated : `${source}${source && !source.endsWith('\n') ? '\n' : ''}${assignment}\n`;
-}
-
 export interface ServerSetupOptions {
-  cwd?: string;
+  directory?: string;
   runtime?: (directory: string, provider: Provider) => DeploymentRuntime;
   listModels?: ModelDiscovery;
   prepareImages?: typeof prepareImages;
-  targets?: TargetStore;
 }
 
 export async function savedProvider(directory: string): Promise<Provider> {
@@ -65,11 +52,8 @@ export async function savedProvider(directory: string): Promise<Provider> {
 }
 
 export async function setupServer(ui: Interaction, options: ServerSetupOptions = {}): Promise<void> {
-  const targets = options.targets ?? targetStore;
-  const previous = await targets.recall('server');
-  ui.note('AMS saves compose.yaml and .env in this directory. Services run in Docker/Podman containers.', 'Compose configuration');
-  const inputDirectory = await ui.text({ id: 'directory', message: 'Compose configuration directory', initial: previous ? displayHomePath(previous) : './ams' });
-  const directory = resolve(options.cwd ?? process.cwd(), expandHomePath(inputDirectory));
+  const directory = resolve(options.directory ?? configurationDirectory());
+  ui.note(`AMS saves compose.yaml and .env in ${displayHomePath(directory)}. Services run in Docker/Podman containers.`, 'Compose configuration');
   const existing = await readEnv(join(directory, '.env'));
   const services = await selectServices(ui, existing);
   const provider = await ui.select<Provider>('provider', 'Container engine / Compose provider', [
@@ -91,7 +75,6 @@ export async function setupServer(ui: Interaction, options: ServerSetupOptions =
   await preserveInputs(directory);
   await atomicWrite(join(directory, '.env'), encodeEnv(env));
   await atomicWrite(join(directory, '.ams/runtime.json'), JSON.stringify({ provider }, null, 2) + '\n');
-  await targets.remember('server', directory);
   ui.note(`Configuration saved in ${displayHomePath(directory)}.\nApply it later with: ams apply`, 'Configuration saved');
   if (await ui.confirm('apply', 'Apply configuration now?', true)) await applyServer(ui, directory, options);
 }
@@ -103,9 +86,14 @@ export async function applyServer(ui: Interaction, directory: string, options: S
   try {
     const raw = await readEnv(join(directory, '.env'));
     if (!Object.keys(raw).length) throw new Error();
-    env = validateEnv(raw);
+    env = validateEnv(raw, { allowPendingModels: true });
   } catch {
     throw new DeploymentError('Cannot read a valid saved server configuration from .env. Check this file or run ams before applying.');
+  }
+  const localModels = usesLocalInternalModels(env);
+  const pendingModels = internalModelFields(env).filter(name => !env[name]);
+  if (localModels && pendingModels.length && ui.interactive === false) {
+    throw new DeploymentError(`Set ${pendingModels.join(', ')} in .env or run ams apply in an interactive terminal to select models after CLIProxyAPI authorization.`);
   }
   const plan = resolveDeployment(env);
   const services = plan.services;
@@ -117,6 +105,7 @@ export async function applyServer(ui: Interaction, directory: string, options: S
     if (adminKey) return adminKey;
     const key = generateKey('admin');
     await ui.handoff(key);
+    ui.note('Initializing Core administrator and starting the remaining services...');
     adminKey = key;
     return key;
   } : undefined;
@@ -139,7 +128,6 @@ export async function applyServer(ui: Interaction, directory: string, options: S
   if (runtime.snapshot && !snapshotPending) await restoreSnapshotInputs(directory);
   await atomicWrite(join(directory, '.ams/images.json'), JSON.stringify(manifest, null, 2) + '\n');
   let result: Awaited<ReturnType<DeploymentRuntime['apply']>> = undefined;
-  let appliedInputs: Awaited<ReturnType<typeof captureInputs>> | undefined;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const reservation = await runtime.reservePorts?.(manifest, env);
     try {
@@ -149,11 +137,35 @@ export async function applyServer(ui: Interaction, directory: string, options: S
       const changed = resolved.interfaces.filter(item => previous[item.field] !== String(item.port));
       if (changed.length) ui.note(changed.map(item => `${item.service}: 127.0.0.1:${previous[item.field]} → 127.0.0.1:${item.port}`).join('\n')
         + '\nUpdate any Caddy upstreams that use these ports.', 'Resolved ports');
+      if (localModels) {
+        if (!runtime.prepareInternalProxy || !runtime.discoverInternalModels) throw new DeploymentError('This runtime cannot prepare CLIProxyAPI for internal models. Update AMS and retry ams apply.');
+        await reservation?.release();
+        ui.note('Preparing CLIProxyAPI before starting Core and Knowledge.', 'Internal models');
+        await runtime.prepareInternalProxy(manifest, env);
+        await authorizeProxy(ui, runtime, env.CLIPROXY_AUTH_PROVIDER as AccountProvider);
+        const missing = internalModelFields(env).filter(name => !env[name]);
+        if (missing.length) {
+          ui.note('Loading available models from CLIProxyAPI (up to 5 seconds).', 'Models');
+          const models = await runtime.discoverInternalModels(manifest, env);
+          if (!models.length) ui.note('No model list is available. Enter the model names manually.', 'Models');
+          for (const name of missing) {
+            env[name] = await selectModel(ui, fields.find(field => field.name === name)!, models);
+            // Keep each completed answer so a cancelled Apply resumes at the next model.
+            const path = join(directory, '.env');
+            const source = await readFile(path, 'utf8');
+            const line = encodeEnv({ [name]: env[name] }).trimEnd();
+            const expression = new RegExp(`^${name}=.*$`, 'gm');
+            await atomicWrite(path, expression.test(source) ? source.replace(expression, () => line)
+              : `${source}${source.endsWith('\n') ? '' : '\n'}${line}\n`);
+          }
+        }
+        env = validateEnv(env);
+      }
       await atomicWrite(join(directory, 'compose.yaml'), renderCompose(env));
       const composeEnv = resolved.requiredImages.map(service => `${imageVariables[service as ImageService]}=${manifest.images[service as ImageService]!.id}`);
       for (const key of ['DATA_DIR', ...resolved.interfaces.map(item => item.field)]) composeEnv.push(`${key}='${env[key].replace(/'/g, "\\'")}'`);
       await atomicWrite(join(directory, '.ams/compose.env'), composeEnv.join('\n') + '\n');
-      appliedInputs = await captureInputs(directory);
+      const appliedInputs = await captureInputs(directory);
       // Helpers hold engine bindings until the containers are ready to take over.
       await reservation?.release();
       ui.note('Applying selected local services. Each readiness stage can take up to 90 seconds.');
@@ -172,34 +184,19 @@ export async function applyServer(ui: Interaction, directory: string, options: S
   const interfaces = resolveDeployment(env).interfaces.map(interfaceDescription);
   ui.note(interfaces.join('\n'), 'Published loopback interfaces');
   ui.note(result?.pending.length ? `Local processes started; integrations pending:\n${result.pending.join('\n')}\nRun ams apply after their peers are available.` : 'Selected local containers started. External access, model authorization and semantic memory are separate checks.');
-  if (services.includes('cli-proxy-api')) {
-    const savedProvider = env.CLIPROXY_AUTH_PROVIDER as AccountProvider;
-    if (!await runtime.hasProviderAuthorization?.(savedProvider)) {
-      const selectedProvider = await ui.select<AccountProvider>('login', 'CLIProxyAPI account login', [
-        { value: 'codex', label: accountProviders.codex.label },
-        { value: 'claude', label: accountProviders.claude.label },
-      ], savedProvider);
-      let needsLogin = true;
-      if (selectedProvider !== savedProvider) {
-        const path = join(directory, '.env');
-        await atomicWrite(path, withAccountProvider(await readFile(path, 'utf8'), selectedProvider));
-        needsLogin = !await runtime.hasProviderAuthorization?.(selectedProvider);
-      }
-      if (needsLogin) {
-        if (selectedProvider === 'claude') ui.note('Open the displayed URL in your browser. When redirected to localhost, copy the full callback URL from the address bar, even if the page cannot connect. Paste it when the terminal prompts after 15 seconds; do not submit an empty answer. No public callback port is required.', 'Claude login');
-        await runtime.login(selectedProvider);
-        if (runtime.hasProviderAuthorization && !await runtime.hasProviderAuthorization(selectedProvider)) {
-          throw new DeploymentError(`${accountProviders[selectedProvider].label} login did not save authorization. Run ams apply to retry.`);
-        }
-      }
-      if (selectedProvider !== savedProvider && appliedInputs?.['.env']) {
-        // Authorization completed: include this selection in the next rollback baseline.
-        // Keep the other inputs captured at apply time, even if files changed during login.
-        await recordAppliedInputs(directory, {
-          ...appliedInputs, '.env': withAccountProvider(appliedInputs['.env'], selectedProvider),
-        });
-      }
-    }
+  if (services.includes('cli-proxy-api') && !localModels) {
+    await authorizeProxy(ui, runtime, env.CLIPROXY_AUTH_PROVIDER as AccountProvider);
   }
   ui.note('Run ams and choose Show connection details to see connection ports and all configured keys.', 'Connection details');
+}
+
+/** Share provider-specific authorization between early local preparation and normal external Apply. */
+async function authorizeProxy(ui: Interaction, runtime: DeploymentRuntime, provider: AccountProvider): Promise<void> {
+  if (await runtime.hasProviderAuthorization?.(provider)) return;
+  if (ui.interactive === false) throw new DeploymentError(`CLIProxyAPI ${accountProviders[provider].label} authorization is missing. Run ams apply in an interactive terminal to sign in.`);
+  if (provider === 'claude') ui.note('Open the displayed URL in your browser. When redirected to localhost, copy the full callback URL from the address bar, even if the page cannot connect. Paste it when the terminal prompts after 15 seconds; do not submit an empty answer. No public callback port is required.', 'Claude login');
+  await runtime.login(provider);
+  if (runtime.hasProviderAuthorization && !await runtime.hasProviderAuthorization(provider)) {
+    throw new DeploymentError(`${accountProviders[provider].label} login did not save authorization. Run ams apply to retry.`);
+  }
 }

@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { setupServer } from '../dist/setup/server.js';
-import { createTargetStore } from '../dist/setup/targets.js';
 import { runtimeFor } from '../dist/runtime/compose.js';
 import { runProcess } from '../dist/runtime/process.js';
 import { encodeEnv, readEnv } from '../dist/config/files.js';
@@ -41,7 +40,7 @@ test('actual model instructions, no-task L0 and SSE cancellation', { skip: !enab
   await mkdir(join(directory, '.ams'));
   await writeFile(join(directory, '.ams/images.json'), JSON.stringify(manifest));
   let admin; // Captured from setup; remains in memory and the authoritative test database only.
-  const answers = { directory, provider,
+  const answers = { provider,
     MEMORY_PROXY_PUBLIC_URL: 'http://127.0.0.1:19096', KNOWLEDGE_PUBLIC_URL: 'http://127.0.0.1:19422',
     PANEL_PUBLIC_URL: 'http://127.0.0.1:19123', MEMORY_PROXY_PORT: '19096', KNOWLEDGE_PORT: '19422', PANEL_PORT: '19123', MCP_PORT: '19425',
     LLM_BASE_URL: 'http://127.0.0.1:9/v1', LLM_API_KEY: 'synthetic-unused-provider-key',
@@ -69,7 +68,7 @@ test('actual model instructions, no-task L0 and SSE cancellation', { skip: !enab
     note() {}, async handoff(key) { admin = key; },
   };
   // Use production lifecycle/bootstrap; this synthetic inference test does not exercise account login.
-  await setupServer(ui, { runtime: (...args) => ({ ...runtimeFor(...args), hasProviderAuthorization: async () => true }), targets: createTargetStore(join(directory, 'targets.json')) });
+  await setupServer(ui, { runtime: (...args) => ({ ...runtimeFor(...args), hasProviderAuthorization: async () => true }), directory });
   assert.ok(typeof admin === 'string' && /^sk-ams-admin-[a-f0-9]{64}$/.test(admin), 'setup hands off the generated administrator key before authentication');
   const env = await readEnv(join(directory, '.env'));
   const proxyOrigin = `http://127.0.0.1:${env.MEMORY_PROXY_PORT}`;

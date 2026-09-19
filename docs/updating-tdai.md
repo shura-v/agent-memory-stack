@@ -4,7 +4,7 @@
 ams update tdai
 ```
 
-Run this on the machine hosting the stack. AMS uses the last saved installation, just like `ams apply`.
+Run this on the machine hosting the stack. AMS uses `~/.agent-memory-stack`, just like `ams apply`, regardless of the working directory. Older installations elsewhere are not automatically migrated or updated.
 
 The command downloads the latest TDAI revision from `feat/server_team`, records its commit and archive checksum in the installation's `.ams/tdai-source.json`, then builds and applies the update. It works with the installed npm package; no Git checkout or submodule is required. Package files and the packaged CLIProxyAPI version stay unchanged.
 

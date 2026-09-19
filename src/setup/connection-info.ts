@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { readEnv } from '../config/files.js';
 import { validateEnv } from '../config/settings.js';
+import { internalLLM, internalModelFields } from '../config/internal-llm.js';
 import { resolveDeployment } from '../deployment/model.js';
 import { listConnectionKeys, readConnectionKey, type ConnectionKey } from '../runtime/connection-keys.js';
 import { DeploymentError } from '../runtime/errors.js';
@@ -13,7 +14,7 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
   try {
     const raw = await readEnv(join(directory, '.env'));
     if (!Object.keys(raw).length) throw new Error();
-    env = validateEnv(raw);
+    env = validateEnv(raw, { allowPendingModels: true });
   } catch {
     throw new DeploymentError('Cannot read saved connection settings. Check .env or run ams and choose Configure stack.');
   }
@@ -78,11 +79,16 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
     ...(plan.services.includes('cli-proxy-api') ? ['Compose API base URL: http://cli-proxy-api:8317/v1', ...(port('cli-proxy-api') ? listener('cli-proxy-api', '/v1') : ['Host access: not published.'])] : ['Saved credentials; CLIProxyAPI is not configured locally.']),
     ...credential('CLIPROXY_API_KEY', 'Service key'),
   ]);
-  if (env.LLM_API_KEY) block('Internal LLM — memory and Knowledge processing', [
+  const llm = internalLLM(env);
+  const modelFields = internalModelFields(env);
+  if (modelFields.length) block('Internal LLM — memory and Knowledge processing', [
+    `Source: ${llm.source === 'cliproxy' ? "this stack's CLIProxyAPI" : 'external API'}`,
+    `API base URL: ${llm.baseURL}`,
+    ...modelFields.map(name => `${name === 'MEMORY_LLM_MODEL' ? 'Core' : 'Knowledge'} model: ${env[name] || 'select during Apply after CLIProxyAPI authorization'}`),
+    ...credential(llm.source === 'cliproxy' ? 'CLIPROXY_API_KEY' : 'LLM_API_KEY', 'API key'),
+  ]);
+  if (env.LLM_API_KEY && (llm.source === 'cliproxy' || !modelFields.length)) block('External internal-model API — saved credentials, inactive', [
     `API base URL: ${env.LLM_BASE_URL || 'not configured'}`,
-    ...(plan.services.includes('core') || plan.services.includes('knowledge') ? [] : ['Saved credentials; not used by this placement.']),
-    ...(env.MEMORY_LLM_MODEL ? [`Core model: ${env.MEMORY_LLM_MODEL}`] : []),
-    ...(env.KNOWLEDGE_LLM_MODEL ? [`Knowledge model: ${env.KNOWLEDGE_LLM_MODEL}`] : []),
     ...credential('LLM_API_KEY', 'API key'),
   ]);
   for (const remote of [

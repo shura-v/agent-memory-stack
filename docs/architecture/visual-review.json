@@ -5,8 +5,8 @@
       "name": "stack",
       "diagram_type": "architecture",
       "output": "stack.html",
-      "specification_sha256": "bbb44ff74447a7e81f049c529f694237009399b3af4f44b09d68cda7f22f9184",
-      "artifact_sha256": "daa7b25040b4caed403213e18951b6316369d64c90d2c8bed3723a420485f5be",
+      "specification_sha256": "f5f7c0b72989241c77ac1beea3f08190f25b135e3c89ec0e2ff45f5715fab81b",
+      "artifact_sha256": "001adb5f4f1156a4e7fb37588b24a5788ac1d379909b1fab6c45402f5b4f5a3b",
       "validation": {
         "checksPassed": 9,
         "checkCount": 9,
@@ -45,16 +45,18 @@
       ],
       "notes": [
         "Default READ view with motion disabled.",
-        "Inspected node and card fit, labels, route corridors, themes, and overall composition.",
-        "No clipping or overlapping labels observed. Small-screen details can be enlarged with viewer zoom."
+        "Inspected node and card fit, route labels, themes, and overall composition.",
+        "No clipping or overlapping labels observed. Small-screen details can be enlarged with viewer zoom.",
+        "One visual correction shortened the explanatory cards to remove 17 pixels of overflow at 1440 x 900.",
+        "The two internal-model branches are mutually exclusive configuration alternatives; MCP topology remains unchanged."
       ]
     },
     {
       "name": "mcp",
       "diagram_type": "architecture",
       "output": "mcp.html",
-      "specification_sha256": "ace6300906a4458a0db6b5bec155dae9dc8b15ea82ed515fa7e4c63d39d47569",
-      "artifact_sha256": "4c74cc54dc5dbd8c5b080a5ee00999b6906a6697f5de89d8059497fb18f1518f",
+      "specification_sha256": "978c668a657ba8f12f167e6af418abcff497a56a1fe0b0f1971cb73acb49f506",
+      "artifact_sha256": "4dfa801f5af92473e9306b5b0e6909ee785af3b9b2231fb6511cefff363347c4",
       "validation": {
         "checksPassed": 9,
         "checkCount": 9,
@@ -64,7 +66,7 @@
         "warnings": 0
       },
       "visual_review": "passed",
-      "correction_rounds": 1,
+      "correction_rounds": 0,
       "manually_inspected_screenshots": [
         "mcp.visual-check.1440x900.dark.png",
         "mcp.visual-check.2048x1320.light.png"
@@ -93,10 +95,17 @@
       ],
       "notes": [
         "Default READ view with motion disabled.",
-        "Inspected node and card fit, labels, route corridors, themes, and overall composition.",
-        "No clipping or overlapping labels observed. Small-screen details can be enlarged with viewer zoom."
+        "Inspected node and card fit, route labels, themes, and overall composition.",
+        "No clipping or overlapping labels observed. Small-screen details can be enlarged with viewer zoom.",
+        "MCP topology and behavior labels are unchanged; obsolete commit-pinned source links were removed."
       ]
     }
   ],
-  "scope": "Documentation and rendered composition only; no application or live deployment validation performed."
+  "overview": {
+    "path": "../images/agent-memory-stack-overview.png",
+    "source": "stack.visual-check.2048x1320.light.png",
+    "method": "Unmodified headless screenshot of the delivered Archify HTML.",
+    "sha256": "1a22af35baac7778a92e731196887cd3931d2aafeb520ef62a34bbdf1d57fd7e"
+  },
+  "scope": "Documentation and rendered composition only; no application tests, container operations, live inference, or deployment validation performed."
 }

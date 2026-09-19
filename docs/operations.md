@@ -4,6 +4,8 @@ For an overview and a quick start, see the [README](../README.md). For source bu
 
 ## 🚀 1. Start setup
 
+![Agent Memory Stack setup walkthrough](images/agent-memory-stack-setup.gif)
+
 Install Node.js 24+ and npm to configure the stack. Server application also requires Docker or Podman with Compose. Fresh installations use the pinned sources in the packaged `upstream.lock.json`; a separate TencentDB checkout is unnecessary.
 
 To update TDAI on this server, run `ams update tdai`. It downloads the latest `feat/server_team` revision and rebuilds/applies the saved installation. The selected revision lives in its `.ams/tdai-source.json`; the npm package is unchanged. See [Updating TDAI](updating-tdai.md).
@@ -13,7 +15,7 @@ npm install -g agent-memory-stack
 ams
 ```
 
-The menu offers **Configure stack**, **Apply configuration**, and **Show connection details**. Start with **Configure stack**. If a complete installation is already visible, AMS points you to its `.env`; use **Apply configuration** for later changes. Otherwise, follow the setup questions. The wizard saves configuration, then asks **Apply configuration now?**, with **Yes** selected. **No** exits successfully and keeps the saved configuration. **Yes** applies it immediately. Apply later by choosing **Apply configuration** in the menu or running the standalone command, without repeating setup questions:
+The menu offers **Configure stack**, **Apply configuration**, and **Show connection details**. Start with **Configure stack**. If a complete installation is already visible, AMS points you to its `.env`. Use **Apply configuration** for later changes to the fixed configuration folder; see the older-installation note below for stacks elsewhere. Otherwise, follow the setup questions. The wizard saves configuration, then asks **Apply configuration now?**, with **Yes** selected. **No** exits successfully and keeps the saved configuration. **Yes** applies it immediately. Apply later by choosing **Apply configuration** in the menu or running the standalone command, without repeating setup questions. A local configuration with missing Core/Knowledge models completes those choices after CLIProxyAPI authorization during apply:
 
 ```sh
 ams apply
@@ -21,13 +23,13 @@ ams apply
 
 **Wizard controls:** Escape returns to the previous question; Ctrl+C cancels. Confirmed answers are restored when revisiting a question; changing an earlier answer clears dependent answers. Press Enter on a saved secret field to keep its value. Escape on the first menu exits. Back navigation ends when configuration is saved; declining immediate application keeps your saved settings for later.
 
-From this checkout, use `npm run dev -- apply`. The CLI remembers the most recently saved installation directory for the current OS user in `$XDG_CONFIG_HOME/agent-memory-stack/targets.json`, defaulting to `~/.config/agent-memory-stack/targets.json`. The file contains only the version and absolute installation path. Installed `ams` commands work from any directory; no path argument or Compose project hash is needed. The remembered path is a convenience for deferred application, not an installation ownership record.
+From this checkout, use `npm run dev -- apply`. Configure, apply, `ams update tdai`, and **Show connection details** always use `~/.agent-memory-stack`, resolved from the current OS user's home directory. The folder contains `.env`, `compose.yaml`, and `.ams/`. The calling directory and `XDG_CONFIG_HOME` do not change it. There is no configuration-directory prompt, public directory flag, or `targets.json` pointer.
 
 Server apply verifies the saved Compose provider before building images or proceeding with application. It then checks local image identities and build-input fingerprints, builds missing or outdated images, resolves published ports in the selected engine, saves the chosen ports, regenerates configuration, and recreates containers. The first build downloads pinned sources, base images, and dependencies. The wizard manages `.ams/images.json` automatically; you do not need to supply it. Changing `.env` does not require rebuilding unchanged images. Updating packaged code or image build inputs triggers a cached rebuild before services stop; matching images loaded from a bundle remain reusable offline.
 
 `ams apply` remains available after installation. Once local Core is healthy, apply checks whether it already has an active administrator. Existing administrators keep their keys, even when an earlier attempt started only part of the stack. If Core reports that initial setup is required, AMS automatically generates an administrator key, prints it, and asks you to save it before initialization. There is no generate/manual choice. Other check failures stop application without generating or replacing credentials.
 
-Saved desired configuration remains available if application fails. Image preparation or preflight failures leave runtime configuration and running application containers unchanged. Downloaded sources and build cache can remain for a retry. Saving configuration alone needs no container engine or administrator key.
+Saved desired configuration remains available if application fails. Image preparation or preflight failures leave runtime configuration and running application containers unchanged. Downloaded sources and build cache can remain for a retry. In shared local-model mode, CLIProxyAPI may already be running after an interrupted authorization/model-selection stage; completed login and confirmed model choices remain available for retry. Core and Knowledge are not started or recreated with placeholder model names. Saving configuration alone needs no container engine or administrator key.
 
 ### Optional: prepare images on another machine
 
@@ -48,23 +50,27 @@ On the destination machine:
 
 ```sh
 npm install --global ./agent-memory-stack-0.1.0.tgz
-node "$(npm root -g)/agent-memory-stack/dist/build/cli.js" --runtime docker --project-dir ./server --load ./images
+node "$(npm root -g)/agent-memory-stack/dist/build/cli.js" --runtime docker --project-dir "$HOME/.agent-memory-stack" --load ./images
 ams
 ```
 
-Use `--runtime podman` for Podman image operations. In setup, select Docker Compose, configured `podman compose`, `podman-compose`, or `uvx podman-compose`. Shell aliases such as `docker=podman` are not used. Load images into the same installation directory you select in the wizard; verified images are reused. Container startup itself does not compile applications. These commands do not publish to npm or a registry.
+Use `--runtime podman` for Podman image operations. In setup, select Docker Compose, configured `podman compose`, `podman-compose`, or `uvx podman-compose`. Shell aliases such as `docker=podman` are not used. Load images into `~/.agent-memory-stack`; verified images are reused. Container startup itself does not compile applications. These commands do not publish to npm or a registry.
 
 `Podman compose (configured provider)` requires an external Compose provider already configured for `podman compose`. If only Podman and uv are installed, select **Podman + uvx podman-compose**. An unavailable provider now fails before image builds, with instructions for the selected provider.
 
+### Existing installations in another folder
+
+AMS does not automatically move or delete older configuration, data, or containers, and does not read an old `targets.json`. Its commands now address only `~/.agent-memory-stack`. Manage an existing installation elsewhere through its existing Compose configuration until you plan a migration. Changing the project path changes its Compose identity and can change relative data paths; copying configuration alone is not a safe migration.
+
 ## ⚙️ 2. Configure the local stack
 
-The editable `.env` lives beside `compose.yaml` in the directory chosen during setup (default: `./ams`). `ams apply` uses the last saved directory. `server/.env.example` is the configuration template; `deploy/` contains the image build files.
+The editable `.env` lives beside `compose.yaml` in the fixed `~/.agent-memory-stack` folder. `ams apply` reads that folder from any working directory. `server/.env.example` is the configuration template; `deploy/` contains the image build files.
 
 After you choose **Configure stack**, and before any configuration question, setup inspects the current user's available Docker and Podman endpoints read-only. The initial menu is always shown; opening it alone does not trigger detection. The five original application service labels must belong to one exact AMS Compose project in one engine. Support/init containers do not count; stopped application containers do. When the group is complete, output points to its `.env` using the project working-directory label if available and exits successfully. No credentials or configuration files are read by this check.
 
 This detects ordinary repeated setup; it does not enforce uniqueness across inaccessible contexts, deleted/partial stacks, concurrent invocations, or other accounts. If no complete group is visible, setup continues, including save-only operation without a running engine. It creates no registry or lock and repairs nothing automatically.
 
-Run `ams` and choose **Configure stack**. The first question suggests `./ams` in the current directory; a remembered installation path takes precedence. Directory prompts display your home directory as `~` and accept `~/...`; AMS expands it before reading or saving files. Relative data paths such as `./data` remain relative to the installation directory. Fresh installations include all six application services:
+Run `ams` and choose **Configure stack**. Configuration goes directly into `~/.agent-memory-stack` without a directory question. Relative data paths such as `./data` resolve inside that folder. Fresh installations include all six application services:
 
 | Service | Purpose |
 | --- | --- |
@@ -77,7 +83,24 @@ Run `ams` and choose **Configure stack**. The first question suggests `./ams` in
 
 Support containers are added automatically. The wizard displays the configured services and asks no service-selection, dependency-placement, stack-address, port, or interface-enablement questions. An existing explicit `AMS_SERVICES` selection and its advanced network settings remain unchanged. To add MCP to a saved installation, append `mcp` to `AMS_SERVICES` in its `.env` and run `ams apply`. Existing explicit selections are preserved.
 
-The remaining questions cover the installation and data directories, Compose provider, real LLM API base/key, separate Core and Knowledge models, CLIProxyAPI account provider, memory prompt mode, and log level. The provider URL has a neutral placeholder and no preset real endpoint. The wizard automatically reuses saved Core and CLIProxyAPI service keys and generates missing local keys without questions. Explicit keys in `.env` remain authoritative; remote credentials are never generated. The real provider API key remains an interactive input. Administrator handling happens during application. Advanced split deployments are configured through `.env`; missing required fields produce named configuration errors instead of additional topology questions.
+The remaining questions cover the Compose provider, CLIProxyAPI account provider, internal model source, memory prompt mode, and log level. The CLIProxyAPI account provider question comes before **Models for memory and Knowledge**. The wizard automatically reuses saved Core and CLIProxyAPI service keys and generates missing local keys without questions. Explicit service keys in `.env` remain authoritative; remote credentials are never generated. Administrator handling happens during application. Advanced split deployments are configured through `.env`; missing required fields produce named configuration errors instead of additional topology questions.
+
+`DATA_DIR` defaults to `./data`, relative to the Compose configuration directory. Setup retains an existing saved value exactly and asks no **Data directory** question. Change the data path manually in `.env`; the configuration folder itself stays fixed.
+
+### Models for memory and Knowledge
+
+For a fresh installation containing local CLIProxyAPI and Core or Knowledge, **Use this stack's CLIProxyAPI** is selected initially. The other choice is **Connect another model API**. Core and Knowledge keep separate model settings in both modes; the agent selects its own inference model.
+
+| Setting | Shared CLIProxyAPI | Separate external API |
+| --- | --- | --- |
+| `INTERNAL_LLM_SOURCE` | `cliproxy` | `external` |
+| Effective API base | `http://cli-proxy-api:8317/v1` inside Compose | Your `LLM_BASE_URL` |
+| Effective credential | Current `CLIPROXY_API_KEY`, derived automatically | Your `LLM_API_KEY` |
+| Model fields | `MEMORY_LLM_MODEL` and `KNOWLEDGE_LLM_MODEL`, selected after login when missing | The same separate fields, selected during setup |
+
+Local mode asks for no internal API address or key and needs no extra host listener. Updating the CLIProxyAPI service key takes effect for internal consumers on apply. Core, Knowledge, and agent inference share account capacity but can use different models.
+
+Existing settings without `INTERNAL_LLM_SOURCE` retain `external` behavior, including a manually entered local proxy URL and key. AMS does not infer ownership from URL equality. To opt in, set `INTERNAL_LLM_SOURCE=cliproxy` with local `cli-proxy-api` in `AMS_SERVICES`, then apply. Existing model IDs stay unchanged. Switching back to `external` uses the retained `LLM_BASE_URL` and `LLM_API_KEY`; provide valid external settings if none were saved. Without a local proxy, use `external`; without local Core/Knowledge, no internal model questions are needed.
 
 **Memory prompt mode** controls what Core extracts and summarizes from conversations. Choose **code** (the default) for project decisions, technical constraints, and reusable team practices; choose **chat** for personal preferences, events, and lasting instructions. This changes Core's memory prompts, not the model used to answer agent requests.
 
@@ -94,12 +117,16 @@ Core defaults follow the pinned TDAI deployment script, `deploy/global-images/st
 
 ### Complete local installation
 
-For Core and Knowledge models, the wizard tries the provider's `GET /models` endpoint using the entered API base and key. A returned list becomes a select menu with a manual-entry option; an unavailable, malformed, or empty list falls back to text input after at most 5 seconds. An explicit HTTP 401/403 response displays an API access error and asks for the key again before model selection; Escape lets you edit earlier answers. Saved model names remain available, including names absent from the list. Discovery runs once per provider/key entry on the machine running the CLI, retries after an access error, and does not send an inference request.
+**Shared CLIProxyAPI:** save desired configuration with missing model fields if necessary. Apply prepares and authorizes CLIProxyAPI first, then requests its model list from inside the Compose network. Only missing consumed model fields trigger prompts. Confirmed choices are saved individually; cancelling after one model or after login lets the next `ams apply` resume the remaining work. Reapplying complete settings preserves saved models even if the provider no longer lists them. Noninteractive apply stops with the missing field names and interactive-apply guidance.
 
-1. Choose **Configure stack**, confirm the **Compose configuration directory** (for `compose.yaml` and `.env`) and Compose provider, and enter your real model-provider settings. Services run in containers.
-2. Review and save the configuration. **Apply configuration now? → No** keeps it for later; **Yes** applies it immediately.
-3. Application prepares images, resolves ports, and starts Core. For a new Core, save the automatically generated administrator key and confirm **OK**; application then initializes it and starts the remaining services.
-4. If the selected CLIProxyAPI account provider needs authorization, complete its optional login flow. Open Panel at the printed address and copy your agent's endpoint and key there.
+**External API:** setup asks for the real API base and key, then requests `GET /models` from the CLI host. An explicit HTTP 401/403 asks for a corrected external key. The local route instead reports a proxy authorization or service-key failure; it does not ask for an unrelated external credential.
+
+Model discovery in either route is best effort, bounded to five seconds, with manual model entry when the list is empty or unavailable. It does not send an inference request. Panel does not overwrite the Core or Knowledge model bindings.
+
+1. Choose **Configure stack**, select the Compose provider, then choose your CLIProxyAPI account provider before **Models for memory and Knowledge**.
+2. Review and save. **Apply configuration now? → No** keeps settings for later without an engine; **Yes** applies immediately.
+3. In shared local mode, apply prepares CLIProxyAPI, reuses valid saved authorization or completes login, and asks for missing Core/Knowledge models. The full deployment follows only when real model IDs are saved.
+4. For a new Core, save its generated administrator key and confirm **OK**. When services are ready, choose **Show connection details** to open Panel and configure your agent. External mode retains its normal account-login stage.
 
 ### Automatic ports
 
@@ -135,7 +162,7 @@ Set `MEMORY_PROXY_PUBLIC_URL` and `PANEL_PUBLIC_URL` in the installation `.env` 
 
 CLIProxyAPI supports several AI providers and API formats. Setup asks which account to configure: **ChatGPT (Codex)** or **Claude**. The choice is stored as `CLIPROXY_AUTH_PROVIDER=codex` or `claude`; an absent value defaults to `codex` for compatibility. On an existing installation, change it in `.env` and run `ams apply`.
 
-Apply checks the selected provider's saved authorization before offering login. A matching, non-disabled record with an access or refresh credential skips the question. Otherwise, choose **ChatGPT (Codex)** or **Claude**; the saved provider is selected by default. Choosing another provider saves that preference in `.env` and checks its saved credentials before starting login. Credentials from another provider and a nonempty model list do not count as authorization for the selected provider. The check reads the authorization directory through a read-only helper with networking disabled; read/runtime failures are reported instead of treated as missing login. Saved credentials do not prove token freshness or inference access.
+Apply uses the provider saved in `CLIPROXY_AUTH_PROVIDER` without asking you to choose again. This also applies when you answer **Yes** to **Apply configuration now?** in the wizard. A matching, non-disabled record with an access or refresh credential skips login; otherwise, apply starts authorization for the saved provider. Credentials from another provider and a nonempty model list do not count as authorization for the selected provider. The check reads the authorization directory through a read-only helper with networking disabled; read/runtime failures are reported instead of treated as missing login. Saved credentials do not prove token freshness or inference access.
 
 | Selected account | Browser and terminal steps |
 | --- | --- |
@@ -222,6 +249,8 @@ The protected Knowledge tool gateway stays inside Compose by default. MemoryProx
 
 ### Agent connection information
 
+Follow [Connect Codex and Claude Code](agent-profiles.md) for reusable CLI launch commands and Knowledge MCP registration.
+
 Copy your agent's MemoryProxy Base URL and API key from **Panel → API Keys → Client Access Endpoint**. On the service host, use localhost. On another computer, use your Caddy domain and preserve the endpoint path shown in Panel.
 
 The administrator key and memory-user key are not stored in the installation configuration. Use your saved administrator key to sign into Panel, and obtain the intended user key and authorized team/agent IDs there. Knowledge and MemoryProxy use the same memory-user identity; Core and CLIProxyAPI service keys are not agent credentials.
@@ -230,7 +259,7 @@ Run `ams` and choose **Show connection details** to see the saved Panel URL, Mem
 
 The screen groups each service’s address and matching credentials together. Panel shows its URL/port and administrator login keys. MemoryProxy shows its listener, native Base URL guidance from Panel, and all active user keys; MCP shows its `/mcp` URL, Streamable HTTP transport, and the same user keys. Administrator keys are labeled as full access. Each value appears on its own plain, unwrapped line beneath its label in that service block.
 
-Core and CLIProxyAPI show their service endpoint or internal-only status beside their service key. Internal LLM shows its API base, Core/Knowledge models, and provider key. Saved remote Core/model addresses appear beside their remote keys, explicitly marked inactive when unused. Every configured `.env` secret remains visible, including retained credentials for inactive services; provider/service keys are distinguished from agent credentials.
+Core and CLIProxyAPI show their service endpoint or internal-only status beside their service key. Internal LLM shows the selected source, effective API base/key, and separate Core/Knowledge models. In local mode the key is the current CLIProxyAPI service key; retained external API settings are labeled inactive. Saved remote Core/model addresses appear beside their remote keys, explicitly marked inactive when unused. Every configured `.env` secret remains visible, including retained credentials for inactive services; provider/service keys are distinguished from agent credentials.
 
 AMS reads Core’s database without changes: it enumerates active keys once, rechecks each key before reading it once, and repeats the captured values in the applicable service blocks. There is no key-selection prompt. If one key becomes unavailable, the remaining keys still appear. If Core is remote or unavailable, `.env` credentials remain visible; use Panel → API Keys for user keys. AMS creates no key file and does not print these connection details during Apply/update or in container logs. The explicit display can remain in terminal scrollback or capture. Service ports are saved configuration, not a live health check.
 
@@ -250,7 +279,7 @@ Saving keeps desired `.env` and provider settings separate from previous applied
 2. Prepare the destination independently and restore compatible data if continuity is required. Keep the source OAuth refresher stopped before starting the same token files elsewhere.
 3. On the original machine, remove the service from AMS_SERVICES and configure its remote replacement in .env, and review local removals before applying. Retain the original data and local keys for reversal.
 4. To reverse the switch, stop the remote owner if it shares restored state, restore the local service in AMS_SERVICES and its corresponding modes, and reuse its preserved data and key. Compare any divergent data before resuming; there is no automatic synchronization.
-5. For configuration rollback, preserve `.ams/previous-settings` outside the installation first, stop its writers, restore the matching saved settings/package/images and compatible data as needed, then use the saved target's explicit apply command. Verify identity, a reference conversation, and Wiki content. An incomplete apply does not promise atomic database rollback.
+5. For configuration rollback, preserve `.ams/previous-settings` outside the installation first, stop its writers, restore the matching saved settings/package/images and compatible data as needed, then run `ams apply` for the fixed configuration folder. Verify identity, a reference conversation, and Wiki content. An incomplete apply does not promise atomic database rollback.
 
 A cold recovery backup must include **the entire `DATA_DIR`**, `.env`, `compose.yaml`, and the `.ams` directory. Use a tool with permission to read UID 10001 files; restrict the archive to `0600`. Restore into a separate empty directory first. Update `DATA_DIR` in `.env` if the location changes. Restore and inspect the target/container state explicitly; the setup guard and apply heuristic do not provide automatic recovery for restored or incomplete data. Retain only one active OAuth refresher. Back up Caddy/TLS through your separate process.
 

@@ -4,6 +4,12 @@
 
 Agent Memory Stack (AMS) brings TencentDB Agent Memory together with CLIProxyAPI and a remote MCP server. Give your coding agent persistent memory, reusable skills, and access to project knowledge while using your existing model accounts. Run the stack on your laptop or a VPS, and keep working in Codex, Claude Code, or another compatible agent.
 
+**Built with:**
+
+- [TencentDB Agent Memory (TDAI)](https://github.com/TencentCloud/TencentDB-Agent-Memory) — memory, skills, Wiki, CodeGraph, MemoryProxy, and the web panel.
+- [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) — connects your AI accounts and subscriptions to the stack's models.
+- [Supergateway](https://github.com/supercorp-ai/supergateway) — bridges the Knowledge MCP server from stdio to Streamable HTTP, with user authentication and access checks provided by AMS.
+
 ## ✨ What you get
 
 - **Memory across conversations.** Keep project decisions, preferences, and useful context in your own stack. MemoryProxy brings relevant memory into the agent's model requests.
@@ -16,17 +22,18 @@ Agent Memory Stack (AMS) brings TencentDB Agent Memory together with CLIProxyAPI
 
 The core idea is simple: **combine TencentDB's memory and knowledge with the model access you already have.** AMS brings the services together in one Compose project, with a web panel for users, keys, and resources.
 
-| Model access | How it fits |
+| Models for memory and Knowledge | How it fits |
 | --- | --- |
-| ChatGPT subscription / Codex | Sign in through CLIProxyAPI for the agent's model requests |
-| Claude subscription | Sign in through CLIProxyAPI for the agent's model requests |
-| z.ai or another compatible model API | Supply an API base URL and key for Core and Knowledge processing |
+| **Use this stack's CLIProxyAPI** — default for a fresh full stack | Reuse your signed-in model account for agent inference, memory processing, and Knowledge; no extra API address or key to enter |
+| **Connect another model API** — optional | Supply a separate API base URL and key for Core and Knowledge while the agent continues through CLIProxyAPI |
 
-The agent's model and the models that organize memory and knowledge are configured separately. For example, you can use Codex for coding and z.ai for memory processing, choosing a separate model for Knowledge. API credentials for internal processing are entered separately from account login. More provider setup options are planned; the current account-login menu offers Codex and Claude.
+Choose the Core memory model and Knowledge model independently in either mode. Your agent still chooses its own model. Sharing CLIProxyAPI shares account capacity; choosing a separate external API keeps internal processing on that provider. The account-login menu offers ChatGPT (Codex) and Claude.
+
+With the default local route, setup can save configuration before Docker/Podman is running. On apply, AMS starts CLIProxyAPI, completes account login if needed, then asks for any missing Core/Knowledge model choices. Cancel and run `ams apply` later to resume: confirmed models and completed login are retained. Existing installations keep their explicit external settings until you choose the shared route.
 
 ## 🗺️ How it fits together
 
-[![Agent Memory Stack: an agent connects to MemoryProxy for model requests with memory, and separately to MCP for protected Knowledge tools.](https://raw.githubusercontent.com/shura-v/agent-memory-stack/main/docs/images/agent-memory-stack-overview.png)](https://shura-v.github.io/agent-memory-stack/architecture/stack.html)
+[![Agent Memory Stack: MemoryProxy and MCP are separate agent connections; memory and Knowledge models share CLIProxyAPI by default or use an optional external API.](https://raw.githubusercontent.com/shura-v/agent-memory-stack/main/docs/images/agent-memory-stack-overview.png)](https://shura-v.github.io/agent-memory-stack/architecture/stack.html)
 
 **Explore the interactive diagrams:** [Stack overview](https://shura-v.github.io/agent-memory-stack/architecture/stack.html) · [Inside the MCP bridge](https://shura-v.github.io/agent-memory-stack/architecture/mcp.html).
 
@@ -48,6 +55,8 @@ AMS runs the MCP HTTP-to-stdio bridge on the server and checks the caller's user
 
 ## 🚀 Start setup
 
+![Agent Memory Stack setup walkthrough](https://raw.githubusercontent.com/shura-v/agent-memory-stack/main/docs/images/agent-memory-stack-setup.gif)
+
 You need **Node.js 24+** and **Docker or Podman with Compose** on the machine that will run the stack.
 
 ```sh
@@ -55,11 +64,11 @@ npm install -g agent-memory-stack
 ams
 ```
 
-1. Choose **Configure stack** and follow the prompts for your model API and account provider.
-2. Apply the configuration. AMS builds the images and starts the services. Save the administrator key when prompted and complete provider login.
+1. Choose **Configure stack** and select your CLIProxyAPI account provider first. Then, under **Models for memory and Knowledge**, keep **Use this stack's CLIProxyAPI** or choose **Connect another model API**.
+2. Apply the configuration. For the shared route, complete account login and select separate Core/Knowledge models when prompted. AMS then starts the remaining services; save the administrator key for a new Core.
 3. Choose **Show connection details** to find Panel, MemoryProxy, and MCP. Open Panel to get your agent’s Base URL and user API key.
 
-The first build downloads sources and dependencies and can take several minutes. Configuration is saved in `./ams` by default; you can choose another directory.
+The first build downloads sources and dependencies and can take several minutes. Configuration always lives in `~/.agent-memory-stack`: `.env`, `compose.yaml`, and `.ams/`. The default data path is `./data` inside that folder; edit `DATA_DIR` in `.env` to change it.
 
 For later changes, edit the saved `.env` and run `ams apply`. To update TencentDB Agent Memory on the installation, run `ams update tdai`.
 
@@ -68,6 +77,7 @@ For later changes, edit the saved `.env` and run `ams apply`. To update TencentD
 | Guide | What you will find |
 | --- | --- |
 | [Setup and operations](https://github.com/shura-v/agent-memory-stack/blob/main/docs/operations.md) | Configuration, provider login, Caddy, MCP connections, and recovery |
+| [Connect Codex and Claude Code](https://github.com/shura-v/agent-memory-stack/blob/main/docs/agent-profiles.md) | CLI launch profiles for MemoryProxy and commands to add Knowledge MCP |
 | [Updating TDAI](https://github.com/shura-v/agent-memory-stack/blob/main/docs/updating-tdai.md) | Update the upstream services on your installation |
 | [Architecture](https://shura-v.github.io/agent-memory-stack/architecture/stack.html) | Interactive map of the stack on GitHub Pages |
 

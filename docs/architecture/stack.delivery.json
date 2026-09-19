@@ -6,12 +6,12 @@
   "input": "/Users/super/git/agent-memory-stack/docs/architecture/stack.json",
   "output": "/Users/super/git/agent-memory-stack/docs/architecture/stack.html",
   "specification": {
-    "sha256": "bbb44ff74447a7e81f049c529f694237009399b3af4f44b09d68cda7f22f9184",
-    "bytes": 6499
+    "sha256": "f5f7c0b72989241c77ac1beea3f08190f25b135e3c89ec0e2ff45f5715fab81b",
+    "bytes": 5289
   },
   "artifact": {
-    "sha256": "daa7b25040b4caed403213e18951b6316369d64c90d2c8bed3723a420485f5be",
-    "bytes": 718690
+    "sha256": "001adb5f4f1156a4e7fb37588b24a5788ac1d379909b1fab6c45402f5b4f5a3b",
+    "bytes": 717233
   },
   "validation": {
     "checksPassed": 9,
@@ -20,11 +20,5 @@
     "compositionStatus": "pass",
     "errors": 0,
     "warnings": 0
-  },
-  "evidence": {
-    "verified": true,
-    "repository": "https://github.com/shura-v/agent-memory-stack",
-    "revision": "bd6782f3dbaa81877d05e19cac56e7e5e69c9834",
-    "references": 10
   }
 }

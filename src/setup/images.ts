@@ -50,7 +50,7 @@ export async function prepareImages(options: PrepareImagesOptions, dependencies:
     manifest = validateImageManifest(JSON.parse(await readFile(manifestPath, 'utf8')), false, platform);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw new DeploymentError(`Cannot reuse image metadata at ${manifestPath}: ${error instanceof Error ? error.message : 'invalid manifest'}. Restore valid metadata or choose a new installation directory.`);
+      throw new DeploymentError(`Cannot reuse image metadata at ${manifestPath}: ${error instanceof Error ? error.message : 'invalid manifest'}. Restore valid image metadata before retrying ams apply.`);
     }
   }
 
@@ -72,7 +72,7 @@ export async function prepareImages(options: PrepareImagesOptions, dependencies:
     const rawId = inspection?.Id;
     const id = typeof rawId === 'string' ? (rawId.startsWith('sha256:') ? rawId : `sha256:${rawId}`) : undefined;
     if (id !== identity.id || `${inspection?.Os}/${inspection?.Architecture}` !== identity.platform) {
-      throw new DeploymentError(`Image verification failed for ${service}: ${runtime} image ID or platform does not match saved metadata. Restore the original image or use a new installation directory.`);
+      throw new DeploymentError(`Image verification failed for ${service}: ${runtime} image ID or platform does not match saved metadata. Restore the original image before retrying ams apply.`);
     }
     if (inspection?.Config?.Labels?.[buildFingerprintLabel] !== await buildFingerprint(service, undefined, projectDir)) {
       missing.push(service);

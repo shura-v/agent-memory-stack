@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { displayHomePath, expandHomePath } from '../dist/setup/paths.js';
+import { configurationDirectory, displayHomePath } from '../dist/setup/paths.js';
 
 test('setup displays the current home prefix without changing relative or unrelated paths', () => {
   assert.equal(displayHomePath(homedir()), '~');
@@ -12,10 +12,6 @@ test('setup displays the current home prefix without changing relative or unrela
   }
 });
 
-test('setup expands home shorthand and preserves relative path semantics', () => {
-  assert.equal(expandHomePath('~'), homedir());
-  assert.equal(expandHomePath('~/ams/data'), join(homedir(), 'ams', 'data'));
-  for (const path of ['./ams', './data', '/srv/ams', '~someone/ams', 'directory/~/data']) {
-    assert.equal(expandHomePath(path), path);
-  }
+test('configuration has a fixed location under the current user home', () => {
+  assert.equal(configurationDirectory(), join(homedir(), '.agent-memory-stack'));
 });

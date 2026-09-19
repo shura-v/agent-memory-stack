@@ -2,6 +2,8 @@ export class Cancelled extends Error { constructor() { super('Setup cancelled');
 export class Back extends Error { constructor() { super('Previous question'); } }
 export type Question = { id: string; message: string; initial?: string; placeholder?: string; secret?: boolean; validate?: (value: string) => string | undefined };
 export interface Interaction {
+  /** False for real terminal adapters without interactive input. Test adapters may omit it. */
+  interactive?: boolean;
   text(question: Question): Promise<string>;
   select<T extends string>(id: string, message: string, options: { value: T; label: string }[], initial?: T): Promise<T>;
   multiselect<T extends string>(id: string, message: string, options: { value: T; label: string }[], initial: T[]): Promise<T[]>;

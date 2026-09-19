@@ -1,8 +1,12 @@
 import { resolveDeployment } from '../deployment/model.js';
+import { internalLLM } from './internal-llm.js';
+import { validateEnv } from './settings.js';
 const serviceId = 'ams';
 
 export function serviceConfigs(env: Record<string, string>) {
+  env = validateEnv(env);
   const deployment = resolveDeployment(env);
+  const llm = internalLLM(env);
   const { core: coreConnection, model, knowledge, panel: panelConnection, proxy: proxyConnection } = deployment.connections;
   const coreUrl = coreConnection.endpoint;
   const coreKey = coreConnection.key;
@@ -51,8 +55,8 @@ export function serviceConfigs(env: Record<string, string>) {
       AMS_CORE_API_KEY: env.CORE_API_KEY,
       AMS_IDENTITY_FILE: '/data/ams-identity.json',
       TDAI_DATA_DIR: '/data/memory', TDAI_METADATA_SQLITE_BASE_DIR: '/data/metadata', STORE_MODE: 'sqlite',
-      TDAI_LLM_PROVIDER: 'openai', TDAI_LLM_BASE_URL: env.LLM_BASE_URL,
-      TDAI_LLM_API_KEY: env.LLM_API_KEY, TDAI_LLM_MODEL: env.MEMORY_LLM_MODEL,
+      TDAI_LLM_PROVIDER: 'openai', TDAI_LLM_BASE_URL: llm.baseURL,
+      TDAI_LLM_API_KEY: llm.apiKey, TDAI_LLM_MODEL: env.MEMORY_LLM_MODEL,
       TDAI_LLM_MAX_TOKENS: env.MEMORY_LLM_MAX_TOKENS, TDAI_LLM_TIMEOUT_MS: env.MEMORY_LLM_TIMEOUT_MS,
       LOG_LEVEL: env.LOG_LEVEL,
     },
@@ -63,7 +67,7 @@ export function serviceConfigs(env: Record<string, string>) {
       AMS_CORE_URL: coreUrl, AMS_CORE_API_KEY: coreKey, AMS_IDENTITY_FILE: '/data/ams-identity.json',
       AMS_KNOWLEDGE_SERVICE_URL: 'http://knowledge-service:8423',
       LLM_MODE: 'custom', LLM_PROTOCOL: 'openai', LLM_PROVIDER: 'custom',
-      LLM_BASE_URL: env.LLM_BASE_URL, LLM_API_KEY: env.LLM_API_KEY, LLM_MODEL: env.KNOWLEDGE_LLM_MODEL,
+      LLM_BASE_URL: llm.baseURL, LLM_API_KEY: llm.apiKey, LLM_MODEL: env.KNOWLEDGE_LLM_MODEL,
       LLM_MAX_TOKENS: env.KNOWLEDGE_LLM_MAX_TOKENS, LLM_TIMEOUT_MS: env.KNOWLEDGE_LLM_TIMEOUT_MS,
       KNOWLEDGE_CLICKHOUSE_ENABLED: 'false', KNOWLEDGE_AUTO_SYNC_ENABLED: 'false',
     },

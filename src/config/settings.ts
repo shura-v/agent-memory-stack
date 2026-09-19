@@ -2,6 +2,7 @@ import { DeploymentError } from "../runtime/errors.js";
 import { randomBytes } from 'node:crypto';
 import { resolveDeployment, selectionFromEnv } from '../deployment/model.js';
 import { accountProviders } from './providers.js';
+import { internalLLM, internalModelFields, usesLocalInternalModels } from './internal-llm.js';
 
 export type Field = { name: string; label: string; default?: string; placeholder?: string; secret?: boolean; role?: 'core' | 'cliproxy'; choices?: string[] };
 export const fields: Field[] = [
@@ -28,6 +29,7 @@ export const fields: Field[] = [
   { name: 'KNOWLEDGE_PUBLIC_URL', label: 'Knowledge HTTP(S) origin', default: 'http://127.0.0.1:8422' },
   { name: 'PANEL_PUBLIC_URL', label: 'Panel HTTP(S) origin', default: 'http://127.0.0.1:8123' },
   { name: 'DATA_DIR', label: 'Data directory (relative to installation or absolute)', default: './data' },
+  { name: 'INTERNAL_LLM_SOURCE', label: 'Models for memory and Knowledge', default: 'external', choices: ['cliproxy', 'external'] },
   { name: 'LLM_BASE_URL', label: 'API base URL', placeholder: 'https://api.example.com/v1' },
   { name: 'LLM_API_KEY', label: 'API key', secret: true },
   { name: 'MEMORY_LLM_MODEL', label: 'Core memory model' },
@@ -73,7 +75,7 @@ export function validateField(field: Field, value: string): string | undefined {
   if (field.secret && value.trim() !== value) return `Remove surrounding whitespace from ${field.name}`;
   return undefined;
 }
-export function validateEnv(input: Record<string, string>): Record<string, string> {
+export function validateEnv(input: Record<string, string>, { allowPendingModels = false }: { allowPendingModels?: boolean } = {}): Record<string, string> {
   const selected = selectionFromEnv(input);
   const env = { ...defaults, ...input };
   env.AMS_SERVICES = selected.join(',');
@@ -82,7 +84,8 @@ export function validateEnv(input: Record<string, string>): Record<string, strin
   }
   const deployment = resolveDeployment(env, { requireConnections: false });
   const consumed = fields.filter(field => deployment.fields.includes(field.name));
-  const errors = consumed.filter(f => validateField(f, env[f.name] ?? '')).map(f => f.name);
+  const pending = new Set<string>(allowPendingModels && usesLocalInternalModels(env) ? internalModelFields(env).filter(name => !env[name]) : []);
+  const errors = consumed.filter(f => !pending.has(f.name) && validateField(f, env[f.name] ?? '')).map(f => f.name);
   if (selected.includes('core') && selected.includes('cli-proxy-api') && env.CORE_API_KEY === env.CLIPROXY_API_KEY) errors.push('CLIPROXY_API_KEY');
   if (Object.keys(input).some(k => !fields.some(f => f.name === k))) errors.push('unknown settings (use the current template)');
   if (deployment.connections.knowledge.mode === 'remote' && env.KNOWLEDGE_TOOLS_PUBLIC_ENABLED === 'true' && !input.KNOWLEDGE_PUBLIC_URL) errors.push('KNOWLEDGE_PUBLIC_URL (explicit remote origin required)');
@@ -95,5 +98,9 @@ export function validateEnv(input: Record<string, string>): Record<string, strin
 }
 export function reviewSettings(env: Record<string, string>): string {
   const consumed = resolveDeployment(env, { requireConnections: false }).fields;
-  return fields.filter(f => consumed.includes(f.name)).map(f => `${f.name}: ${f.secret ? '[set]' : env[f.name]}`).join('\n');
+  const local = usesLocalInternalModels(env);
+  const models = internalModelFields(env);
+  const lines = fields.filter(f => consumed.includes(f.name)).map(f => `${f.name}: ${f.secret ? '[set]' : local && models.includes(f.name as typeof models[number]) && !env[f.name] ? '[select after CLIProxyAPI authorization]' : env[f.name]}`);
+  if (local) lines.push(`Effective internal API base URL: ${internalLLM(env).baseURL}`, 'Effective internal API key: CLIPROXY_API_KEY [set]');
+  return lines.join('\n');
 }

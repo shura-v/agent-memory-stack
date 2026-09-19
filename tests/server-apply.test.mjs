@@ -28,8 +28,7 @@ function ui(answers = {}) {
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'ams-save-apply-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const remembered = [];
-  return { dir, remembered, targets: { recall: async () => dir, remember: async (...args) => remembered.push(args) } };
+  return { dir };
 }
 function forbidden() { assert.fail('Save-only must not invoke runtime or image preparation'); }
 async function save(f, answers = {}, options = {}) {
@@ -41,7 +40,7 @@ async function save(f, answers = {}, options = {}) {
     await writeFile(join(f.dir, '.env'), encodeEnv(settings));
   }
   const questions = ui({ apply: false, ...answers });
-  await setupServer(questions, { targets: f.targets, runtime: forbidden, prepareImages: forbidden, listModels: async () => [], ...options });
+  await setupServer(questions, { directory: f.dir, runtime: forbidden, prepareImages: forbidden, listModels: async () => [], ...options });
   return questions;
 }
 function runtime(dir, overrides = {}) {
@@ -56,14 +55,14 @@ function runtime(dir, overrides = {}) {
   };
 }
 
-test('No saves a fresh Core configuration and remembers its directory without engine or admin prompts', async t => {
+test('No saves a fresh Core configuration without directory, engine or admin prompts', async t => {
   const f = await fixture(t);
   const questions = await save(f, { services: ['core'], provider: 'podman-compose' });
   const env = await readEnv(join(f.dir, '.env'));
   assert.equal(env.AMS_SERVICES, 'core');
   assert.equal(env.LLM_API_KEY, 'provider-secret');
   assert.deepEqual(JSON.parse(await readFile(join(f.dir, '.ams/runtime.json'), 'utf8')), { provider: 'podman-compose' });
-  assert.deepEqual(f.remembered, [['server', f.dir]]);
+  assert.ok(!questions.asked.includes('directory'));
   assert.ok(!questions.asked.includes('admin'));
   assert.ok(!questions.asked.includes('generate:admin'));
   assert.deepEqual(questions.handoffs, []);
@@ -102,75 +101,72 @@ test('apply compares the selected provider instead of accepting another saved ac
     const settings = await readEnv(join(f.dir, '.env'));
     settings.CLIPROXY_AUTH_PROVIDER = provider;
     await writeFile(join(f.dir, '.env'), encodeEnv(settings));
-    const questions = ui({ login: provider });
+    const questions = ui();
     const authorized = new Set(['codex']);
     const logins = [];
     await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
       hasProviderAuthorization: async selected => { assert.equal(selected, provider); return authorized.has(selected); },
       login: async selected => { logins.push(selected); authorized.add(selected); },
     }) });
-    assert.equal(questions.asked.includes('login'), provider === 'claude');
+    assert.deepEqual(questions.asked, []);
     assert.deepEqual(logins, provider === 'claude' ? ['claude'] : []);
   }
 });
 
 test('provider login cannot silently succeed without saving the selected authorization', async t => {
   const f = await fixture(t); await save(f);
-  await assert.rejects(applyServer(ui({ login: 'codex' }), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
+  await assert.rejects(applyServer(ui(), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
     hasProviderAuthorization: async () => false, login: async () => {},
   }) }), /login did not save authorization/);
 });
 
-test('login offers provider names, saves the selected provider, and checks its own credentials', async t => {
-  const f = await fixture(t); await save(f);
+test('standalone apply logs into the configured provider without questions and preserves settings and rollback baseline', async t => {
+  const f = await fixture(t); await save(f, { CLIPROXY_AUTH_PROVIDER: 'claude' });
   await writeFile(join(f.dir, '.env'), await readFile(join(f.dir, '.env'), 'utf8') + '# Keep this operator note\n');
-  const questions = ui({ login: 'claude' }); const select = questions.select;
-  questions.select = async (id, label, choices, initial) => {
-    if (id === 'login') {
-      assert.deepEqual(choices.map(choice => choice.value), ['codex', 'claude']);
-      assert.equal(initial, 'codex');
-      assert.match(choices[0].label, /ChatGPT/); assert.equal(choices[1].label, 'Claude');
-    }
-    return select.call(questions, id, label, choices, initial);
-  };
+  const source = await readFile(join(f.dir, '.env'), 'utf8');
+  const questions = ui();
   const checked = [], loggedIn = []; const authorized = new Set();
   await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
     hasProviderAuthorization: async selected => { checked.push(selected); return authorized.has(selected); },
     login: async selected => { loggedIn.push(selected); authorized.add(selected); },
   }) });
   assert.deepEqual(loggedIn, ['claude']);
-  assert.deepEqual(checked, ['codex', 'claude', 'claude']);
+  assert.deepEqual(checked, ['claude', 'claude']);
+  assert.deepEqual(questions.asked, []);
   assert.equal((await readEnv(join(f.dir, '.env'))).CLIPROXY_AUTH_PROVIDER, 'claude');
-  assert.match(await readFile(join(f.dir, '.env'), 'utf8'), /# Keep this operator note/);
+  assert.equal(await readFile(join(f.dir, '.env'), 'utf8'), source);
+  assert.match(questions.notes.join('\n'), /copy the full callback URL/);
   assert.match(questions.notes.at(-1), /Run ams and choose Show connection details/);
   const appliedEnv = await readFile(join(f.dir, '.env'), 'utf8');
   assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/last-applied-inputs.json'), 'utf8'))['.env'], appliedEnv);
-  await writeFile(join(f.dir, '.env'), appliedEnv.replace('CLIPROXY_AUTH_PROVIDER=claude', 'CLIPROXY_AUTH_PROVIDER=codex'));
+  await writeFile(join(f.dir, '.env'), encodeEnv({ ...await readEnv(join(f.dir, '.env')), CLIPROXY_AUTH_PROVIDER: 'codex' }));
   await assert.rejects(applyServer(ui(), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
     apply: async () => { throw new Error('Startup failed'); },
   }) }), /Startup failed/);
   assert.equal(await readFile(join(f.dir, '.ams/previous-settings/.env'), 'utf8'), appliedEnv);
 });
 
-test('choosing an already authorized alternate provider skips login and retains the new selection', async t => {
-  const f = await fixture(t); await save(f);
-  const questions = ui({ login: 'claude' });
+test('an already authorized configured provider skips login and provider questions', async t => {
+  const f = await fixture(t); await save(f, { CLIPROXY_AUTH_PROVIDER: 'claude' });
+  const questions = ui();
   await applyServer(questions, f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
     hasProviderAuthorization: async selected => selected === 'claude',
     login: async () => assert.fail('Existing Claude authorization must be reused'),
   }) });
   assert.equal((await readEnv(join(f.dir, '.env'))).CLIPROXY_AUTH_PROVIDER, 'claude');
+  assert.deepEqual(questions.asked, []);
   assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/last-applied-inputs.json'), 'utf8'))['.env'], await readFile(join(f.dir, '.env'), 'utf8'));
   assert.match(questions.notes.at(-1), /Run ams and choose Show connection details/);
 });
 
-test('failed alternate-provider login keeps the chosen provider for a retry', async t => {
-  const f = await fixture(t); await save(f);
-  await assert.rejects(applyServer(ui({ login: 'claude' }), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
-    hasProviderAuthorization: async () => false, login: async () => { throw new Error('Login cancelled'); },
+test('failed configured-provider login keeps the provider and applied settings for a retry', async t => {
+  const f = await fixture(t); await save(f, { CLIPROXY_AUTH_PROVIDER: 'claude' });
+  const source = await readFile(join(f.dir, '.env'), 'utf8');
+  await assert.rejects(applyServer(ui(), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
+    hasProviderAuthorization: async () => false, login: async provider => { assert.equal(provider, 'claude'); throw new Error('Login cancelled'); },
   }) }), /Login cancelled/);
-  assert.equal((await readEnv(join(f.dir, '.env'))).CLIPROXY_AUTH_PROVIDER, 'claude');
-  assert.match(JSON.parse(await readFile(join(f.dir, '.ams/last-applied-inputs.json'), 'utf8'))['.env'], /CLIPROXY_AUTH_PROVIDER="codex"/);
+  assert.equal(await readFile(join(f.dir, '.env'), 'utf8'), source);
+  assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/last-applied-inputs.json'), 'utf8'))['.env'], source);
 });
 
 test('cancelling administrator handoff after Core starts retains configuration and prevents initialization', async t => {
@@ -179,7 +175,7 @@ test('cancelling administrator handoff after Core starts retains configuration a
   const questions = ui({ apply: true, cancelHandoff: true });
   const events = [];
   await assert.rejects(setupServer(questions, {
-    targets: f.targets, listModels: async () => [],
+    directory: f.dir, listModels: async () => [],
     prepareImages: async () => { events.push('images'); return images; },
     runtime: () => runtime(f.dir, {
       apply: async (_key, { createAdminKey }) => {
@@ -191,7 +187,7 @@ test('cancelling administrator handoff after Core starts retains configuration a
   }), Cancelled);
   assert.deepEqual(events, ['images', 'Core ready without administrator']);
   assert.equal((await readEnv(join(f.dir, '.env'))).AMS_SERVICES, 'core');
-  assert.deepEqual(f.remembered, [['server', f.dir], ['server', f.dir]]);
+  assert.ok(!questions.asked.includes('directory'));
   assert.equal(questions.handoffs.length, 1);
   for (const file of ['.env', '.ams/runtime.json', '.ams/before-save.json']) {
     assert.ok(!(await readFile(join(f.dir, file), 'utf8')).includes(questions.handoffs[0]));
@@ -261,13 +257,12 @@ test('failed image preparation retains newly saved desired configuration and exi
   await writeFile(join(f.dir, '.env'), encodeEnv(edited));
   const questions = ui();
   await assert.rejects(setupServer(questions, {
-    targets: f.targets,
+    directory: f.dir,
     prepareImages: async () => { throw new Error('Image preparation failed'); },
     runtime: () => runtime(f.dir, { preflight: forbidden, apply: forbidden }),
   }), /Image preparation failed/);
   assert.equal((await readEnv(join(f.dir, '.env'))).CLIPROXY_SERVICE_PORT, '28318');
   assert.equal(await readFile(join(f.dir, 'compose.yaml'), 'utf8'), 'old compose bytes');
-  assert.equal(f.remembered.length, 2);
 });
 
 test('multiple saves and repeated applies preserve the last applied exact input bytes for rollback', async t => {

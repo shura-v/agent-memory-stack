@@ -8,11 +8,7 @@
     "viewBox": [
       1390,
       890
-    ],
-    "repository": {
-      "url": "https://github.com/shura-v/agent-memory-stack",
-      "revision": "bd6782f3dbaa81877d05e19cac56e7e5e69c9834"
-    }
+    ]
   },
   "components": [
     {
@@ -27,12 +23,6 @@
       "size": [
         235,
         88
-      ],
-      "sources": [
-        {
-          "path": "README.md",
-          "label": "Implementation"
-        }
       ]
     },
     {
@@ -48,19 +38,13 @@
       "size": [
         235,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/config/services.ts",
-          "label": "Implementation"
-        }
       ]
     },
     {
       "id": "cliproxy",
       "type": "backend",
       "label": "CLIProxyAPI",
-      "sublabel": "Provider account access",
+      "sublabel": "ChatGPT / Claude account access",
       "pos": [
         732,
         80
@@ -68,32 +52,6 @@
       "size": [
         235,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/config/providers.ts",
-          "label": "Implementation"
-        }
-      ]
-    },
-    {
-      "id": "provider",
-      "type": "external",
-      "label": "Agent model provider",
-      "sublabel": "ChatGPT / Claude / others",
-      "pos": [
-        1093,
-        80
-      ],
-      "size": [
-        245,
-        88
-      ],
-      "sources": [
-        {
-          "path": "src/config/providers.ts",
-          "label": "Implementation"
-        }
       ]
     },
     {
@@ -109,12 +67,6 @@
       "size": [
         235,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/config/services.ts",
-          "label": "Implementation"
-        }
       ]
     },
     {
@@ -129,19 +81,13 @@
       "size": [
         245,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/config/services.ts",
-          "label": "Implementation"
-        }
       ]
     },
     {
-      "id": "internal_llm",
-      "type": "external",
-      "label": "Internal LLM API",
-      "sublabel": "Core / Knowledge models",
+      "id": "model_source",
+      "type": "backend",
+      "label": "Internal model source",
+      "sublabel": "Configuration: choose ONE route",
       "pos": [
         1093,
         340
@@ -149,12 +95,6 @@
       "size": [
         245,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/config/services.ts",
-          "label": "Implementation"
-        }
       ]
     },
     {
@@ -170,12 +110,6 @@
       "size": [
         235,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/mcp-gateway.ts",
-          "label": "Implementation"
-        }
       ]
     },
     {
@@ -190,12 +124,6 @@
       "size": [
         245,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/access-gateway.ts",
-          "label": "Implementation"
-        }
       ]
     },
     {
@@ -210,12 +138,20 @@
       "size": [
         245,
         88
+      ]
+    },
+    {
+      "id": "external_models",
+      "type": "external",
+      "label": "External model API",
+      "sublabel": "Optional independent provider",
+      "pos": [
+        1093,
+        80
       ],
-      "sources": [
-        {
-          "path": "src/config/services.ts",
-          "label": "Implementation"
-        }
+      "size": [
+        245,
+        88
       ]
     }
   ],
@@ -232,13 +168,6 @@
       "from": "memoryproxy",
       "to": "cliproxy",
       "label": "Inference",
-      "variant": "emphasis"
-    },
-    {
-      "id": "provider-request",
-      "from": "cliproxy",
-      "to": "provider",
-      "label": "Account auth",
       "variant": "emphasis"
     },
     {
@@ -260,8 +189,12 @@
     {
       "id": "core-model",
       "from": "core",
-      "to": "internal_llm",
-      "label": "Memory processing"
+      "to": "model_source",
+      "label": "Core model",
+      "labelAt": [
+        1035,
+        425
+      ]
     },
     {
       "id": "agent-mcp",
@@ -293,33 +226,47 @@
     {
       "id": "knowledge-model",
       "from": "knowledge",
-      "to": "internal_llm",
-      "label": "Wiki processing"
+      "to": "model_source",
+      "label": "Knowledge model"
+    },
+    {
+      "id": "shared-internal-models",
+      "from": "model_source",
+      "to": "cliproxy",
+      "label": "Default: shared",
+      "variant": "emphasis"
+    },
+    {
+      "id": "external-internal-models",
+      "from": "model_source",
+      "to": "external_models",
+      "label": "OR: external API",
+      "variant": "dashed"
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "Two independent connections",
+      "title": "Choose one model route",
       "items": [
-        "MemoryProxy supplies the agent's model API with memory.",
-        "MCP exposes Knowledge tools; it is not the model endpoint."
+        "Fresh stacks share CLIProxyAPI; an external API is optional.",
+        "Core and Knowledge choose separate models; agents choose their own."
       ]
     },
     {
       "dot": "emerald",
-      "title": "One machine or a VPS",
+      "title": "Two agent connections",
       "items": [
-        "Default ports bind only to localhost; setup can choose free ports.",
-        "Locally use localhost. Remotely use your own Caddy with paths preserved."
+        "MemoryProxy adds memory. MCP supplies Knowledge tools.",
+        "Use localhost or Caddy domains; preserve request paths."
       ]
     },
     {
       "dot": "violet",
-      "title": "Management and deployment",
+      "title": "Configure, then apply",
       "items": [
-        "Panel also manages Knowledge through knowledge-service.",
-        "AMS prepares Compose, images and keys; Core and Knowledge have separate model selections."
+        "Save without models; apply signs in and asks for missing choices.",
+        "Existing external settings stay external until you opt in."
       ]
     }
   ]

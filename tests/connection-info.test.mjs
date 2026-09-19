@@ -125,3 +125,18 @@ test('invalid saved configuration gives guidance without accessing keys', async 
   await assert.rejects(showConnectionDetails(f.ui, f.directory, { listKeys: () => assert.fail() }), /Configure stack/);
   assert.equal(f.output.length, 0);
 });
+
+test('shared internal routing displays its effective key and labels retained external settings inactive', async t => {
+  const f = await fixture(t, { ...settings, INTERNAL_LLM_SOURCE: 'cliproxy', MEMORY_LLM_MODEL: '' });
+  await showConnectionDetails(f.ui, f.directory, { listKeys: async () => [] });
+  const internal = block(f, 'Internal LLM');
+  assert.match(internal, /Source: this stack's CLIProxyAPI/);
+  assert.match(internal, /API base URL: http:\/\/cli-proxy-api:8317\/v1/);
+  assert.match(internal, /API key \(CLIPROXY_API_KEY\):\ncpa-secret/);
+  assert.match(internal, /Core model: select during Apply after CLIProxyAPI authorization/);
+  assert.doesNotMatch(internal, /provider-secret/);
+  const external = block(f, 'External internal-model API');
+  assert.match(external, /saved credentials, inactive/);
+  assert.match(external, /API base URL: https:\/\/provider.invalid\/v1/);
+  assert.match(external, /\nprovider-secret\n/);
+});

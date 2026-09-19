@@ -87,13 +87,13 @@ test('save-only setup does not require an available Compose provider', async t =
   t.after(() => rm(dir, { recursive: true, force: true }));
   await writeFile(join(dir, '.env'), encodeEnv(settings));
   const ui = {
-    text: async q => q.id === 'directory' ? dir : q.initial,
+    text: async q => q.initial,
     select: async (id, _message, choices, initial) => id === 'provider' ? 'podman' : initial ?? choices[0].value,
     confirm: async (id, _message, initial) => id === 'apply' ? false : initial,
     note() {},
   };
   const fail = () => assert.fail('Save-only setup must not invoke provider or image preparation');
-  await setupServer(ui, { targets: { recall: async () => undefined, remember: async () => {} }, runtime: fail, prepareImages: fail });
+  await setupServer(ui, { directory: dir, runtime: fail, prepareImages: fail });
   assert.equal((await readEnv(join(dir, '.env'))).AMS_SERVICES, 'cli-proxy-api');
   assert.equal(JSON.parse(await readFile(join(dir, '.ams/runtime.json'), 'utf8')).provider, 'podman');
 });

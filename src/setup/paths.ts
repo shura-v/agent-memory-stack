@@ -8,8 +8,7 @@ export function displayHomePath(path: string): string {
   return path.startsWith(home + sep) ? '~' + path.slice(home.length) : path;
 }
 
-/** Expand home shorthand while preserving installation-relative paths. */
-export function expandHomePath(path: string): string {
-  if (path === '~') return homedir();
-  return path.startsWith('~/') ? join(homedir(), path.slice(2)) : path;
+/** One configuration root per OS user, independent of the current directory. */
+export function configurationDirectory(): string {
+  return join(homedir(), '.agent-memory-stack');
 }

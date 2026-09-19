@@ -6,7 +6,6 @@ import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { setupServer } from '../dist/setup/server.js';
-import { createTargetStore } from '../dist/setup/targets.js';
 import { runtimeFor } from '../dist/runtime/compose.js';
 import { runProcess } from '../dist/runtime/process.js';
 import { encodeEnv, readEnv } from '../dist/config/files.js';
@@ -16,31 +15,36 @@ import { listConnectionKeys, readConnectionKey } from '../dist/runtime/connectio
 // Integration test: temporary state and synthetic keys only. No provider login
 // or model request. Real LLM semantics are a separate acceptance stage.
 const enabled=process.env.AMS_RUNTIME_SMOKE === '1';
+const internalProxy=process.env.AMS_INTERNAL_PROXY_SMOKE === '1';
 const engine=process.env.AMS_CONTAINER_ENGINE??'podman';
 const provider=process.env.AMS_COMPOSE_PROVIDER??'uvx-podman-compose';
 const manifestPath=resolve(process.env.AMS_IMAGE_MANIFEST??'artifacts/images/images.json');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-test('installed service lifecycle, loopback boundary and cold credential restore', {skip:!enabled,timeout:360000}, async t=>{
+test('installed service lifecycle, loopback boundary and cold credential restore', {skip:!enabled,timeout:1200000}, async t=>{
  const dir=await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'ams-runtime-'));
  const project=`ams-${createHash('sha256').update(dir).digest('hex').slice(0,10)}`;
- const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
+ let manifest=JSON.parse(await readFile(manifestPath,'utf8'));
  await mkdir(join(dir,'.ams'));
  await writeFile(join(dir,'.ams/images.json'),JSON.stringify(manifest));
  let admin; // Capture the generated key without writing it outside Core.
- const answers={directory:dir,provider,
+ const answers={provider,
+   INTERNAL_LLM_SOURCE:internalProxy?'cliproxy':'external',
    MEMORY_PROXY_PUBLIC_URL:'https://models.synthetic.invalid',KNOWLEDGE_PUBLIC_URL:'https://wiki.synthetic.invalid',PANEL_PUBLIC_URL:'https://panel.synthetic.invalid',
    MEMORY_PROXY_PORT:'18096',KNOWLEDGE_PORT:'18422',KNOWLEDGE_TOOLS_PUBLIC_ENABLED:'true',PANEL_PORT:'18123',MCP_PORT:'18425',LLM_BASE_URL:'http://127.0.0.1:9/v1',LLM_API_KEY:'synthetic-provider-key',MEMORY_LLM_MODEL:'memory-fixture',KNOWLEDGE_LLM_MODEL:'wiki-fixture'};
  // Advanced network settings are configured through .env, not wizard answers.
- await writeFile(join(dir,'.env'),encodeEnv(Object.fromEntries(Object.entries(answers).filter(([name])=>/_PORT$|_PUBLIC_URL$/.test(name)||name==='KNOWLEDGE_TOOLS_PUBLIC_ENABLED'))),{mode:0o600});
+ await writeFile(join(dir,'.env'),encodeEnv(Object.fromEntries(Object.entries(answers).filter(([name])=>/_PORT$|_PUBLIC_URL$/.test(name)||['KNOWLEDGE_TOOLS_PUBLIC_ENABLED','INTERNAL_LLM_SOURCE'].includes(name)))),{mode:0o600});
  const command=provider==='uvx-podman-compose'?'uvx':provider;
  const prefix=provider==='uvx-podman-compose'?['podman-compose']:['docker','podman'].includes(provider)?['compose']:[];
  const compose=args=>runProcess({command,args:[...prefix,'--project-name',project,'--env-file',join(dir,'.ams/compose.env'),'-f',join(dir,'compose.yaml'),...args],cwd:dir});
  t.after(async()=>{await compose(['down']);});
  t.diagnostic(`Isolated installation: ${dir}`);
  const ui={async multiselect(_id,_message,_options,initial){return initial;},async text(q){const value=answers[q.id]??q.initial;assert.equal(typeof value,'string',q.id);return value;},async select(id,message,options,initial){return answers[id]??initial;},async confirm(id,message,initial){return id==='apply'?true:initial;},note(){},async handoff(key){admin=key;}};
- // Exercise real initialization; account-provider login belongs to separate acceptance.
- await setupServer(ui, { runtime: (...args) => ({ ...runtimeFor(...args), hasProviderAuthorization: async () => true }), targets: createTargetStore(join(dir, 'targets.json')) });
+ // Exercise real preparation/discovery/initialization. In local proxy mode no
+ // account is installed: empty discovery uses the synthetic manual model IDs.
+ // Only the account check is stubbed; real OAuth and inference remain untested.
+ await setupServer(ui, { runtime: (...args) => ({ ...runtimeFor(...args), hasProviderAuthorization: async () => true }), directory: dir });
+ manifest=JSON.parse(await readFile(join(dir,'.ams/images.json'),'utf8'));
  assert.ok(typeof admin==='string'&&/^sk-ams-admin-[a-f0-9]{64}$/.test(admin),'setup hands off the generated administrator key before authentication');
  const connectionKeys=await listConnectionKeys(dir,provider);
  assert.equal(connectionKeys.length,1);
@@ -48,6 +52,17 @@ test('installed service lifecycle, loopback boundary and cold credential restore
  assert.ok(!JSON.stringify(connectionKeys).includes(admin),'metadata listing does not reveal the key');
  assert.ok(await readConnectionKey(dir,provider,connectionKeys[0].keyId)===admin,'explicit lookup returns the handed-off key');
  const env=await readEnv(join(dir,'.env'));
+ if(internalProxy) {
+   assert.equal(env.INTERNAL_LLM_SOURCE,'cliproxy');
+   assert.equal(env.MEMORY_LLM_MODEL,'memory-fixture');
+   assert.equal(env.KNOWLEDGE_LLM_MODEL,'wiki-fixture');
+   // Generated files belong to the service UID; read only the routing fields
+   // through the runtime image instead of changing their permissions.
+   const routing=JSON.parse(await runProcess({command:engine,args:['run','--rm','--network','none','--user','0:0',
+     '-v',`${dir}/generated:/config:ro`,manifest.images.runtime.id,'-e',
+     `const fs=require('node:fs');const c=JSON.parse(fs.readFileSync('/config/core-env.json'));const k=JSON.parse(fs.readFileSync('/config/knowledge-env.json'));const p=JSON.parse(fs.readFileSync('/config/cli-proxy-api.yaml'));console.log(JSON.stringify({core:c.TDAI_LLM_BASE_URL,knowledge:k.LLM_BASE_URL,sharedKey:c.TDAI_LLM_API_KEY===p['api-keys'][0]&&k.LLM_API_KEY===p['api-keys'][0]}));`]}));
+   assert.deepEqual(routing,{core:'http://cli-proxy-api:8317/v1',knowledge:'http://cli-proxy-api:8317/v1',sharedKey:true});
+ }
  const interfaces=resolveDeployment(env).interfaces;
  const proxyOrigin=`http://127.0.0.1:${env.MEMORY_PROXY_PORT}`;
  const knowledgeOrigin=`http://127.0.0.1:${env.KNOWLEDGE_PORT}`;
@@ -106,6 +121,6 @@ test('installed service lifecycle, loopback boundary and cold credential restore
    try{verified=JSON.parse(await runProcess({command:engine,args:['run','--rm','-i','--network',restoredProject+'_stack','-v',`${restored}/generated:/config:ro`,'-e','AMS_ENV_FILE=/config/bootstrap-env.json',manifest.images.runtime.id,'/app/runtime/bootstrap.js','initialize'],input:JSON.stringify({adminKey:admin})}));break;}catch{await sleep(1000);}
  }
  assert.equal(verified?.userId,identity.userId);assert.equal(verified?.created,false);
- await writeFile(join(dir,'validation.json'),JSON.stringify({platform:manifest.images.core.platform,loopbackPorts:interfaces.length,administrator:identity.userId,recreate:true,coldCredentialRestore:true,modelAuthorization:'unverified',L0:'unverified',L1L2L3:'unverified',Wiki:'unverified'},null,2));
+ await writeFile(join(dir,'validation.json'),JSON.stringify({platform:manifest.images.core.platform,loopbackPorts:interfaces.length,administrator:identity.userId,recreate:true,coldCredentialRestore:true,internalModels:internalProxy?'local-cliproxy':'external',modelAuthorization:'unverified',L0:'unverified',L1L2L3:'unverified',Wiki:'unverified'},null,2));
  t.diagnostic('Local lifecycle and cold credential restore passed; model, L0 and Wiki checks remain separate.');
 });

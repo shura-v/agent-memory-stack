@@ -8,11 +8,7 @@
     "viewBox": [
       1390,
       860
-    ],
-    "repository": {
-      "url": "https://github.com/shura-v/agent-memory-stack",
-      "revision": "bd6782f3dbaa81877d05e19cac56e7e5e69c9834"
-    }
+    ]
   },
   "components": [
     {
@@ -27,12 +23,6 @@
       "size": [
         220,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/mcp-gateway.ts",
-          "line": 144
-        }
       ]
     },
     {
@@ -48,16 +38,6 @@
       "size": [
         230,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/mcp-gateway.ts",
-          "line": 136
-        },
-        {
-          "path": "src/runtime/user-auth.ts",
-          "line": 26
-        }
       ]
     },
     {
@@ -73,12 +53,6 @@
       "size": [
         230,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/mcp-workers.ts",
-          "line": 18
-        }
       ]
     },
     {
@@ -94,16 +68,6 @@
       "size": [
         230,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/mcp-adapter.ts",
-          "line": 80
-        },
-        {
-          "path": "src/runtime/mcp-workers.ts",
-          "line": 91
-        }
       ]
     },
     {
@@ -118,16 +82,6 @@
       "size": [
         230,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/user-auth.ts",
-          "line": 26
-        },
-        {
-          "path": "src/runtime/access-gateway.ts",
-          "line": 83
-        }
       ]
     },
     {
@@ -143,12 +97,6 @@
       "size": [
         230,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/access-gateway.ts",
-          "line": 60
-        }
       ]
     },
     {
@@ -164,12 +112,6 @@
       "size": [
         230,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/knowledge-service.ts",
-          "line": 12
-        }
       ]
     },
     {
@@ -185,23 +127,13 @@
       "size": [
         230,
         88
-      ],
-      "sources": [
-        {
-          "path": "src/runtime/knowledge-service.ts",
-          "line": 12
-        },
-        {
-          "path": "src/config/services.ts",
-          "line": 59
-        }
       ]
     }
   ],
   "boundaries": [
     {
       "kind": "region",
-      "label": "mcp container · session processes stay private",
+      "label": "mcp container \u00b7 session processes stay private",
       "wraps": [
         "http_gateway",
         "supergateway",
@@ -289,7 +221,7 @@
       "dot": "rose",
       "title": "Checks before execution",
       "items": [
-        "The HTTP gateway verifies user status and the Core–Knowledge pairing.",
+        "The HTTP gateway verifies user status and the Core\u2013Knowledge pairing.",
         "Access rechecks the user, resource ACL and active team membership."
       ]
     },

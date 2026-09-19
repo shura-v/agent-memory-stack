@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import { setupServer as runSetupServer } from '../dist/setup/server.js';
@@ -16,10 +16,12 @@ import { navigate } from '../dist/setup/navigation.js';
 
 // Workflow tests never contact a provider unless they inject a discovery fixture.
 const noModels = async () => [];
-const targets = { recall: async () => undefined, remember: async () => {} };
-const setupServer = (ui, options = {}) => runSetupServer(ui, { targets, listModels: noModels, prepareImages: async () => structuredClone(manifest), ...options,
-  ...(options.runtime ? { runtime: (...args) => ({ hasProviderAuthorization: async () => true, ...options.runtime(...args) }) } : {}),
-});
+const setupServer = (ui, options = {}) => {
+  assert.ok(options.directory, 'Workflow tests must inject an isolated configuration directory');
+  return runSetupServer(ui, { listModels: noModels, prepareImages: async () => structuredClone(manifest), ...options,
+    ...(options.runtime ? { runtime: (...args) => ({ hasProviderAuthorization: async () => true, ...options.runtime(...args) }) } : {}),
+  });
+};
 const serverQuestions = (ui, existing, services, options = {}) => askServerQuestions(ui, existing, services, { listModels: noModels, ...options });
 
 const settings = validateEnv({ LLM_BASE_URL: 'https://provider.test.invalid/v1', MEMORY_PROXY_PUBLIC_URL: 'https://models.test.invalid', KNOWLEDGE_PUBLIC_URL: 'https://wiki.other.invalid', PANEL_PUBLIC_URL: 'https://panel.third.invalid', LLM_API_KEY: 'provider-\'"\\${VALUE}', MEMORY_LLM_MODEL: 'memory-test', KNOWLEDGE_LLM_MODEL: 'wiki-test', CORE_API_KEY: generateKey('core'), CLIPROXY_API_KEY: generateKey('cliproxy') });
@@ -30,6 +32,8 @@ async function fixture(t) {
   return dir;
 }
 function interaction(answers = {}) {
+  // These workflow fixtures exercise the external-provider path; shared-mode defaults live in internal-source-setup.test.mjs.
+  answers = { INTERNAL_LLM_SOURCE: 'external', ...answers };
   const asked = [], notes = [], handoffs = [], questions = [];
   return { asked, notes, handoffs, questions,
     async text(q) { asked.push(q.id); questions.push(q); const value = answers[q.id] ?? (answers.useDefaults ? q.initial ?? settings[q.id] : settings[q.id] ?? q.initial); assert.equal(typeof value, 'string', q.id); if(q.validate) assert.equal(q.validate(value), undefined, q.id); if(q.secret) assert.equal(q.initial, undefined); return value; },
@@ -51,46 +55,34 @@ test('questions retain operational fields and preserve advanced settings without
   const ui = interaction();
   const env = await serverQuestions(ui, settings);
   assert.deepEqual(env, settings);
-  for (const name of ['DATA_DIR', 'LLM_BASE_URL', 'MEMORY_LLM_MODEL', 'KNOWLEDGE_LLM_MODEL', 'MEMORY_PROMPT_MODE', 'LOG_LEVEL']) assert.ok(ui.asked.includes(name), name);
+  for (const name of ['LLM_BASE_URL', 'MEMORY_LLM_MODEL', 'KNOWLEDGE_LLM_MODEL', 'MEMORY_PROMPT_MODE', 'LOG_LEVEL']) assert.ok(ui.asked.includes(name), name);
   assert.ok(ui.asked.includes('keep:LLM_API_KEY'));
   assert.ok(!ui.asked.some(id => /CORE_API_KEY|CLIPROXY_API_KEY/.test(id)));
   assert.ok(!ui.asked.some(id => /_PORT$|_PUBLIC_URL$|_MODE$|_ENABLED$|^REMOTE_/.test(id) && id !== 'MEMORY_PROMPT_MODE'));
   assert.match(ui.notes.join('\n'), /Other interfaces stay private/);
 });
-test('setup defaults to ./ams and saves an absolute target relative to its working directory', async t => {
-  const cwd = await fixture(t);
-  let remembered;
-  const ui = interaction({ apply: false });
-  await setupServer(ui, { cwd, targets: { recall: async () => undefined, remember: async (_target, path) => { remembered = path; } } });
-  assert.equal(ui.questions.find(q => q.id === 'directory').initial, './ams');
-  assert.equal(remembered, join(cwd, 'ams'));
-  assert.equal((await readEnv(join(remembered, '.env'))).DATA_DIR, './data');
-});
-test('setup shows a remembered home path in shorthand before consuming answers', async () => {
-  const ui = interaction();
-  ui.text = async q => {
-    assert.equal(q.id, 'directory');
-    assert.equal(q.initial, '~/ams');
-    throw new Cancelled();
-  };
-  await assert.rejects(setupServer(ui, { targets: { recall: async () => join(homedir(), 'ams'), remember: async () => assert.fail('cancelled') } }), Cancelled);
-});
-test('setup expands home input before writing and shows data paths in shorthand in review', async t => {
+test('setup writes into its configured directory without directory or data-path questions', async t => {
   const directory = await fixture(t);
-  const destination = join(directory, 'server');
-  let remembered;
-  const ui = interaction({ directory: `~/${relative(homedir(), destination)}`, DATA_DIR: '~/ams/data', apply: false });
-  await setupServer(ui, { targets: { recall: async () => undefined, remember: async (_target, path) => { remembered = path; } } });
-  assert.equal(remembered, destination);
-  assert.equal((await readEnv(join(destination, '.env'))).DATA_DIR, join(homedir(), 'ams', 'data'));
+  const ui = interaction({ apply: false });
+  await setupServer(ui, { directory });
+  assert.equal((await readEnv(join(directory, '.env'))).DATA_DIR, './data');
+  assert.ok(!ui.asked.includes('directory'));
+  assert.ok(!ui.asked.includes('DATA_DIR'));
+});
+test('setup preserves saved data paths and shortens home paths in review', async t => {
+  const directory = await fixture(t);
+  await writeFile(join(directory, '.env'), encodeEnv({ ...settings, DATA_DIR: join(homedir(), 'ams', 'data') }));
+  const ui = interaction({ apply: false });
+  await setupServer(ui, { directory });
+  assert.equal((await readEnv(join(directory, '.env'))).DATA_DIR, join(homedir(), 'ams', 'data'));
   assert.ok(ui.notes.some(note => note.includes('DATA_DIR: ~/ams/data')));
   assert.ok(!ui.notes.some(note => note.includes(settings.LLM_API_KEY)));
 });
-test('data path prompts shorten saved home paths and retain relative installation paths', async () => {
-  for (const [path, displayed] of [[homedir(), '~'], [join(homedir(), 'ams', 'data'), '~/ams/data'], ['./data', './data']]) {
+test('data paths are retained without questions for absolute and relative installation paths', async () => {
+  for (const path of [homedir(), join(homedir(), 'ams', 'data'), './data']) {
     const ui = interaction({ useDefaults: true });
     const env = await serverQuestions(ui, { ...settings, DATA_DIR: path });
-    assert.equal(ui.questions.find(q => q.id === 'DATA_DIR').initial, displayed);
+    assert.ok(!ui.asked.includes('DATA_DIR'));
     assert.equal(env.DATA_DIR, path);
   }
 });
@@ -145,8 +137,8 @@ test('output tokens and LLM timeouts use env defaults or saved values without wi
 });
 test('server writes reviewed config, keeps admin only in handoff and runtime memory', async t => {
   const dir=await fixture(t); const destination=join(dir,'server'); const calls=[];
-  const ui=interaction({directory:destination,provider:'podman-compose'});
-  await setupServer(ui,{runtime:()=>({preflight:async()=>{calls.push('preflight');}, apply:async (key, {createAdminKey})=>{assert.equal(key,undefined); calls.push(await createAdminKey());},login:async()=>{calls.push('login');},status:async()=>''})});
+  const ui=interaction({ provider:'podman-compose'});
+  await setupServer(ui,{directory:destination,runtime:()=>({preflight:async()=>{calls.push('preflight');}, apply:async (key, {createAdminKey})=>{assert.equal(key,undefined); calls.push(await createAdminKey());},login:async()=>{calls.push('login');},status:async()=>''})});
   assert.ok(!ui.asked.includes('server-action'));
   assert.ok(!ui.asked.includes('manifest'));
   assert.equal(calls[0],'preflight'); assert.match(calls[1],/^sk-ams-admin-[a-f0-9]{64}$/); assert.equal(ui.handoffs[0],calls[1]);
@@ -159,8 +151,8 @@ test('server writes reviewed config, keeps admin only in handoff and runtime mem
 test('declined apply or cancelled handoff retains saved settings and never initializes Core', async t => {
   const dir=await fixture(t); await mkdir(join(dir,'.ams')); const before=encodeEnv(settings); await writeFile(join(dir,'.env'),before);
   for(const cancellation of [{apply:false},{cancelHandoff:true}]) {
-    const ui=interaction({directory:dir,LOG_LEVEL:'warn',...cancellation}); let initialized=false, prepared=false;
-    const result = setupServer(ui,{prepareImages:async()=>{prepared=true; return structuredClone(manifest);},runtime:()=>({preflight:async()=>{},apply:async (_key,{createAdminKey})=>{await createAdminKey(); initialized=true;},login:async()=>{},status:async()=>''})});
+    const ui=interaction({ LOG_LEVEL:'warn',...cancellation}); let initialized=false, prepared=false;
+    const result = setupServer(ui,{directory:dir,prepareImages:async()=>{prepared=true; return structuredClone(manifest);},runtime:()=>({preflight:async()=>{},apply:async (_key,{createAdminKey})=>{await createAdminKey(); initialized=true;},login:async()=>{},status:async()=>''})});
     if (cancellation.apply === false) await result;
     else await assert.rejects(result, Cancelled);
     assert.equal((await readEnv(join(dir,'.env'))).LOG_LEVEL,'warn'); assert.equal(initialized,false); assert.equal(prepared,cancellation.apply !== false);
@@ -169,13 +161,14 @@ test('declined apply or cancelled handoff retains saved settings and never initi
 
 test('fresh setup prepares the full implemented stack images after approval and before preflight, without a manifest question', async t => {
   const dir = await fixture(t), destination = join(dir, 'fresh');
-  const ui = interaction({ directory: destination, provider: 'uvx-podman-compose' });
+  const ui = interaction({ provider: 'uvx-podman-compose' });
   const events = [];
   const confirm = ui.confirm;
   ui.confirm = async (...args) => { if (args[0] === 'apply') events.push('approval'); return confirm(...args); };
   ui.commit = () => events.push('commit');
   const selected = structuredClone(manifest);
   await setupServer(ui, {
+    directory: destination,
     prepareImages: async options => {
       events.push('prepare');
       assert.equal(options.projectDir, destination);
@@ -201,8 +194,9 @@ test('image preparation failure preserves installed configuration and skips pref
   const before = encodeEnv(settings), images = JSON.stringify(manifest);
   await writeFile(join(dir, '.env'), before);
   await writeFile(join(dir, '.ams/images.json'), images);
-  const ui = interaction({ directory: dir });
+  const ui = interaction();
   await assert.rejects(setupServer(ui, {
+    directory: dir,
     prepareImages: async () => { throw new Error('synthetic build failure'); },
     runtime: () => ({
       preflight: async () => assert.fail('images unavailable'),
@@ -215,8 +209,8 @@ test('image preparation failure preserves installed configuration and skips pref
 });
 test('saved stack with an active administrator applies without generating or asking for a key',async t=>{
   const dir=await fixture(t); await writeFile(join(dir,'.env'),encodeEnv(settings));
-  const ui=interaction({directory:dir}); let key;
-  await setupServer(ui,{runtime:()=>({preflight:async()=>{},apply:async (value,{createAdminKey})=>{key=value; assert.equal(typeof createAdminKey,'function');},login:async()=>assert.fail('not requested'),status:async()=>assert.fail('setup must apply')})});
+  const ui=interaction(); let key;
+  await setupServer(ui,{directory:dir,runtime:()=>({preflight:async()=>{},apply:async (value,{createAdminKey})=>{key=value; assert.equal(typeof createAdminKey,'function');},login:async()=>assert.fail('not requested'),status:async()=>assert.fail('setup must apply')})});
   assert.equal(key,undefined); assert.deepEqual(ui.handoffs,[]); assert.ok(!ui.asked.includes('admin')); assert.ok(!ui.asked.includes('generate:admin'));
   assert.ok(!ui.asked.includes('server-action'));
   assert.equal((await readEnv(join(dir,'.env'))).CORE_API_KEY,settings.CORE_API_KEY);
@@ -236,9 +230,9 @@ test('standalone CLIProxyAPI asks only its settings and deploys its required sub
   const dir = await fixture(t); const destination = join(dir, 'cli-only');
   await mkdir(destination);
   await writeFile(join(destination, '.env'), encodeEnv(validateEnv({ AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'cli-proxy-api', CLIPROXY_API_KEY: 'saved-cli-key', CLIPROXY_SERVICE_ENABLED: 'true' })));
-  const ui = interaction({ directory: destination });
+  const ui = interaction();
   let applied;
-  await setupServer(ui, { runtime: () => ({
+  await setupServer(ui, { directory: destination, runtime: () => ({
     preflight: async (_manifest, env) => assert.equal(env.AMS_SERVICES, 'cli-proxy-api'),
     apply: async (key, opts) => { applied = opts; assert.equal(key, undefined); }, login: async () => assert.fail('not requested'), status: async () => '',
   }) });
@@ -255,10 +249,10 @@ test('saved local CLIProxyAPI can log in after installation without an action me
   const dir = await fixture(t);
   const env = await serverQuestions(interaction(), {}, ['cli-proxy-api']);
   await writeFile(join(dir, '.env'), encodeEnv(env));
-  const ui = interaction({ directory: dir,  login: 'codex' });
+  const ui = interaction();
   const events = [];
   let authorized = false;
-  await setupServer(ui, { runtime: () => ({
+  await setupServer(ui, { directory: dir, runtime: () => ({
     hasProviderAuthorization: async () => authorized,
     preflight: async () => { events.push('preflight'); },
     apply: async key => { assert.equal(key, undefined); events.push('apply'); },
@@ -266,6 +260,8 @@ test('saved local CLIProxyAPI can log in after installation without an action me
     status: async () => assert.fail('setup must apply'),
   }) });
   assert.deepEqual(events, ['preflight', 'apply', 'login']);
+  assert.equal(ui.asked.filter(id => id === 'CLIPROXY_AUTH_PROVIDER').length, 1);
+  assert.ok(!ui.asked.includes('login'));
   assert.ok(!ui.asked.includes('server-action'));
   assert.equal(ui.handoffs.length, 0);
 });
@@ -423,9 +419,9 @@ test('reviewed removals and declined staged start retain desired settings and pr
   const inventory = JSON.stringify({ version: 1, services: resolveDeployment(settings).containers });
   await writeFile(join(dir, '.ams/applied.json'), inventory);
   for (const cancellation of [{ apply: false }, { 'staged-start': false }]) {
-    const ui = interaction({ directory: dir, ...cancellation });
+    const ui = interaction({ ...cancellation });
     let applied = false;
-    const result = setupServer(ui, { runtime: () => ({ preflight: async () => ({ pending: ['Remote peer unavailable'] }),
+    const result = setupServer(ui, { directory: dir, runtime: () => ({ preflight: async () => ({ pending: ['Remote peer unavailable'] }),
       apply: async () => { applied = true; }, login: async () => assert.fail('not requested'), status: async () => '',
     }) });
     if (cancellation.apply === false) await result;
@@ -442,8 +438,8 @@ test('remote CLIProxyAPI setup has no action menu or local login prompt', async 
   const dir = await fixture(t);
   const env = await serverQuestions(interaction(), { REMOTE_CORE_URL:'https://core.invalid', REMOTE_CORE_API_KEY:'core-remote', REMOTE_MODEL_BASE_URL:'https://model.invalid/v1', REMOTE_MODEL_API_KEY:'model-remote' }, ['memory-proxy']);
   await writeFile(join(dir,'.env'), encodeEnv(env));
-  const ui = interaction({ directory:dir });
-  await setupServer(ui, { runtime: () => ({ preflight:async()=>{}, apply:async key=>assert.equal(key,undefined), login:async()=>assert.fail('remote login forbidden'), status:async()=>'' }) });
+  const ui = interaction();
+  await setupServer(ui, { directory: dir, runtime: () => ({ preflight:async()=>{}, apply:async key=>assert.equal(key,undefined), login:async()=>assert.fail('remote login forbidden'), status:async()=>'' }) });
   assert.ok(!ui.asked.includes('server-action'));
   assert.ok(!ui.asked.includes('generate:admin'));
   assert.ok(!ui.asked.includes('login'));
@@ -456,10 +452,10 @@ test('configuration snapshot preserves previous applied inputs after desired set
   const oldImages = JSON.stringify({ schemaVersion: 1, images: { core: manifest.images.core } });
   await writeFile(join(dir, '.ams/images.json'), oldImages);
   const events = [];
-  const ui = interaction({ directory:dir, LOG_LEVEL:'warn' });
+  const ui = interaction({ LOG_LEVEL:'warn' });
   const handoff = ui.handoff;
   ui.handoff = async key => { events.push('handoff'); await handoff(key); };
-  await setupServer(ui, { runtime: () => ({
+  await setupServer(ui, { directory: dir, runtime: () => ({
     preflight: async () => { events.push('preflight'); },
     snapshot: async input => {
       events.push('snapshot'); assert.deepEqual(input,manifest);
@@ -473,9 +469,9 @@ test('configuration snapshot preserves previous applied inputs after desired set
   assert.equal(await readFile(join(dir,'.ams/previous-settings/.env'),'utf8'), before);
 });
 
-test('Escape returns from provider to directory without restoring removed service questions', async t => {
+test('Escape returns from provider to the action menu without introducing directory questions', async t => {
   const dir = await fixture(t);
-  const ui = interaction({ directory:join(dir,'server'), apply:false });
+  const ui = interaction({ apply:false });
   const select = ui.select;
   let providerVisits = 0;
   ui.select = async (...args) => {
@@ -483,24 +479,24 @@ test('Escape returns from provider to directory without restoring removed servic
     return select(...args);
   };
   ui.multiselect = async () => assert.fail('service selection is not interactive');
-  await run(ui, { apply: async () => assert.fail('Configure selected'), configure: questions => setupServer(questions, { runtime: () => ({
+  await run(ui, { apply: async () => assert.fail('Configure selected'), configure: questions => setupServer(questions, { directory: join(dir, 'server'), runtime: () => ({
     preflight: async () => assert.fail('review not approved'), apply: async () => assert.fail('review not approved'),
   }) }) });
   assert.equal(providerVisits, 2);
-  assert.equal(ui.asked.filter(id => id === 'directory').length, 2);
+  assert.ok(!ui.asked.includes('directory'));
+  assert.equal(ui.asked.filter(id => id === 'action').length, 2);
   assert.equal((await readEnv(join(dir,'server','.env'))).AMS_SERVICES, serviceNames.join(','));
 });
 
-test('post-apply Escape cannot repeat configuration saves, image preparation or installation', async t => {
+test('post-apply login cancellation cannot repeat configuration saves, image preparation or installation', async t => {
   const dir = await fixture(t), destination = join(dir,'server');
-  const ui = interaction({ directory:destination });
+  const ui = interaction();
   let discovery = 0, preflight = 0, snapshots = 0, applied = 0, prepared = 0;
   let coreKey, adminKey;
   const shownKeys = [];
   ui.handoff = async key => { shownKeys.push(key); };
-  const select = ui.select;
-  ui.select = async (...args) => { if (args[0] === 'login') throw new Back(); return select(...args); };
   await assert.rejects(run(ui, { apply: async () => assert.fail('Configure selected'), configure: questions => setupServer(questions, {
+    directory: destination,
     listModels: async () => { discovery++; return []; },
     prepareImages: async () => { prepared++; return structuredClone(manifest); },
     runtime: () => ({
@@ -508,7 +504,7 @@ test('post-apply Escape cannot repeat configuration saves, image preparation or 
       snapshot: async () => { snapshots++; },
       apply: async (_key, { createAdminKey }) => { applied++; adminKey = await createAdminKey(); },
       hasProviderAuthorization: async () => false,
-      login: async () => assert.fail('login cancelled'),
+      login: async () => { throw new Cancelled(); },
     }),
   }) }), Cancelled);
   assert.equal(discovery, 1);

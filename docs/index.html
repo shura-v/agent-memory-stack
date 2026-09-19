@@ -119,7 +119,7 @@
           <a class="card" href="architecture/stack.html">
             <span class="card-label">The big picture</span>
             <h3>Stack overview</h3>
-            <p>See how your agent, model accounts, memory and project knowledge fit together.</p>
+            <p>See how agent inference, memory and Knowledge share CLIProxyAPI by default, with a separate external model API as an alternative.</p>
             <span class="card-action">Explore the stack <span aria-hidden="true">→</span></span>
           </a>
           <a class="card" href="architecture/mcp.html">
@@ -132,15 +132,24 @@
       </section>
 
       <figure>
-        <img src="images/agent-memory-stack-overview.png" alt="Agent Memory Stack overview: the agent connects to MemoryProxy for model requests with memory, and separately to MCP for protected Knowledge tools." loading="lazy">
-        <figcaption>Two connections for your agent: a model API with memory, and MCP for project knowledge.</figcaption>
+        <img src="images/agent-memory-stack-overview.png" alt="Agent Memory Stack overview: MemoryProxy and MCP are separate agent connections; Core and Knowledge choose shared CLIProxyAPI or an external model API." loading="lazy">
+        <figcaption>Two agent connections: MemoryProxy for model requests with memory, and MCP for Knowledge tools. Internal models share CLIProxyAPI by default or use a separate external API.</figcaption>
       </figure>
+
+      <section aria-labelledby="setup-title">
+        <h2 id="setup-title">Set up your stack</h2>
+        <figure>
+          <img src="images/agent-memory-stack-setup.gif" alt="Agent Memory Stack setup walkthrough in the terminal." loading="lazy">
+          <figcaption>Configure your stack with the interactive AMS wizard.</figcaption>
+        </figure>
+      </section>
 
       <nav class="guides" aria-labelledby="guides-title">
         <h2 id="guides-title">Start using the stack</h2>
         <div class="guide-links">
           <a href="https://github.com/shura-v/agent-memory-stack/blob/main/README.md">Quick start</a>
           <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/operations.md">Setup and operations</a>
+          <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/agent-profiles.md">Connect Codex and Claude Code</a>
           <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/development.md">Development guide</a>
         </div>
       </nav>

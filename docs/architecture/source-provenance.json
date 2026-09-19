@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-19T01:11:20.141Z",
+  "change": "use-cliproxy-for-internal-models",
+  "sourceState": "working-tree",
+  "branch": "release/0.1.0",
+  "baseCommit": "46432dd07257bc170348f8fda8857dbe19805516",
+  "note": "Sources were read from the working tree while this change was uncommitted. The base commit alone does not implement the documented model-source behavior. Hashes identify the reviewed source snapshot; this record is not evidence of a deployed stack.",
+  "sources": [
+    {
+      "path": "src/deployment/model.ts",
+      "sha256": "f59ab4be83b0b0ca1e5605aa1bdd80a3ca6796e0abb5a45cb7fd33c1d2477e52"
+    },
+    {
+      "path": "src/config/internal-llm.ts",
+      "sha256": "a14752e80a6201206e9d4d98c5d886950f06b7716b86a3e502becb21b28201f2"
+    },
+    {
+      "path": "src/config/services.ts",
+      "sha256": "26ff73723b4c93ffa62ea9ce479187c37ce384732eca7c637914d4a0f95d1166"
+    },
+    {
+      "path": "src/runtime/render-compose.ts",
+      "sha256": "7c378014834eac4f2de9833fabba868c3ef120db9b6dbd7592366de161f41abe"
+    },
+    {
+      "path": "src/setup/questions.ts",
+      "sha256": "42efcfe122990f64d0bc92a3fed0a32766568b1fa9862ba223907769ac998119"
+    },
+    {
+      "path": "src/setup/server.ts",
+      "sha256": "477c01b9d51bfb88651add69832949c00f78765bdc021af191c605df97a7af26"
+    },
+    {
+      "path": "src/config/providers.ts",
+      "sha256": "a8231139ea37ca9dfaf935bb1e4220e79c1ac16ffd9731027ae8f824fbeb9f05"
+    },
+    {
+      "path": "src/runtime/mcp-gateway.ts",
+      "sha256": "cdbc30a5fe9227b047a46efb46fab03ca9c4126e6ee251593dea79cc22848f71"
+    },
+    {
+      "path": "src/runtime/mcp-workers.ts",
+      "sha256": "589e93b037f1fbad54b0865f86b96c602daf519c1d9b5e3ccd07a38e2aecfed1"
+    },
+    {
+      "path": "deploy/locks/mcp/bind-loopback.mjs",
+      "sha256": "fcd166622daed0eb7e026c5f17494963c20d5c794ffc6b2adb3b240c03b74a88"
+    },
+    {
+      "path": "src/runtime/mcp-adapter.ts",
+      "sha256": "5a739945f4450e9d48c3f70390d305934e674bbbfdfc40a144e04567c30531fc"
+    },
+    {
+      "path": "src/runtime/user-auth.ts",
+      "sha256": "297f98058e3aa8199c7f117d85400a9d8189cbe742fc8f6c72ba0cefde6127b0"
+    },
+    {
+      "path": "src/runtime/access-gateway.ts",
+      "sha256": "7aec52370dbbda330020bd25e4f8321ff564357db50d02cecd265c405cf1a521"
+    },
+    {
+      "path": "src/runtime/knowledge-service.ts",
+      "sha256": "f016b30a98053687553b9eb6988ad68e067262cece4af35f22b8dcbd258ec221"
+    }
+  ]
+}

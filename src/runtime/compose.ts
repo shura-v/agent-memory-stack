@@ -7,8 +7,9 @@ import type { AccountProvider } from '../config/providers.js';
 import { setTimeout } from 'node:timers/promises';
 import { validateDeploymentImages, validateImageManifest } from '../build/images.js';
 import type { ImageManifest, ImagePlatform, ImageService } from '../build/images.js';
-import { readEnv, atomicWrite } from '../config/files.js';
+import { readEnv, atomicWrite, encodeEnv } from '../config/files.js';
 import { validateEnv } from '../config/settings.js';
+import { internalLLM } from '../config/internal-llm.js';
 import { resolveDeployment } from '../deployment/model.js';
 import type { Deployment } from '../deployment/model.js';
 import { ProcessFailure, runProcess } from './process.js';
@@ -17,12 +18,16 @@ import { listConnectionKeys, readConnectionKey } from './connection-keys.js';
 import type { ProbeConfig } from './integration.js';
 import { reservePublishedPorts } from './ports.js';
 import type { PortReservation } from './ports.js';
+import { imageVariables, renderCompose } from './render-compose.js';
+import { InternalModelAccessError } from './model-discovery.js';
 
 export type Provider = 'docker' | 'podman' | 'podman-compose' | 'uvx-podman-compose';
 export type ReadinessResult = { pending: string[] };
 export interface DeploymentRuntime {
   checkProvider?(): Promise<void>;
   snapshot?(manifest: ImageManifest): Promise<void>;
+  prepareInternalProxy?(manifest: ImageManifest, settings: Record<string, string>): Promise<void>;
+  discoverInternalModels?(manifest: ImageManifest, settings: Record<string, string>): Promise<string[]>;
   reservePorts?(manifest: ImageManifest, settings: Record<string, string>): Promise<PortReservation>;
   preflight(manifest: ImageManifest, settings?: Record<string, string>): Promise<ReadinessResult | void>;
   apply(adminKey?: string, options?: { allowPending?: boolean; createAdminKey?: () => Promise<string> }): Promise<ReadinessResult | void>;
@@ -91,8 +96,9 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
       throw new DeploymentError(`Cannot run ${[command, ...prefix, 'version'].join(' ')}. ${instructions[provider]} Verify this command succeeds, then retry ams apply.`);
     }
   }
-  const compose = (args: string[], input?: string, interactive = false) => run({ command, args: [...prefix,
-    '--project-name', project, '--env-file', join(directory, '.ams/compose.env'), '-f', join(directory, 'compose.yaml'), ...args], cwd: directory, input, interactive, env: processEnv,
+  let proxyStage: string | undefined;
+  const compose = (args: string[], input?: string, interactive = false, stage?: string) => run({ command, args: [...prefix,
+    '--project-name', project, '--env-file', join(stage ?? directory, stage ? 'compose.env' : '.ams/compose.env'), '-f', join(stage ?? directory, 'compose.yaml'), ...args], cwd: directory, input, interactive, env: processEnv,
     label: `Compose ${args[0]} (${args.filter(name => managedNames.includes(name)).join(', ') || 'project'})${args.includes('initialize') ? ' administrator initialization' : ''}`,
     classifyPortConflict: args[0] === 'up',
     safeErrorPrefix: args[0] === 'run' && args.includes('bootstrap') ? 'Bootstrap failed: ' : undefined });
@@ -145,6 +151,49 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
   }
   return {
     checkProvider,
+    async prepareInternalProxy(manifest, settings) {
+      if (!resolveDeployment(settings).services.includes('cli-proxy-api')) throw new DeploymentError('Internal model preparation requires local CLIProxyAPI');
+      validateDeploymentImages(manifest, ['runtime', 'cli-proxy-api']);
+      await checkProvider();
+      // Isolate preparation from the full deployment: its consumers can still
+      // have missing model names, and their applied files must remain intact.
+      const stage = join(directory, '.ams/internal-proxy');
+      await mkdir(stage, { recursive: true, mode: 0o700 });
+      const proxySettings = validateEnv({
+        AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'cli-proxy-api',
+        DATA_DIR: resolve(directory, settings.DATA_DIR),
+        CLIPROXY_API_KEY: settings.CLIPROXY_API_KEY,
+        CLIPROXY_AUTH_PROVIDER: settings.CLIPROXY_AUTH_PROVIDER,
+        CLIPROXY_SERVICE_ENABLED: settings.CLIPROXY_SERVICE_ENABLED,
+        CLIPROXY_SERVICE_PORT: settings.CLIPROXY_SERVICE_PORT,
+      });
+      await atomicWrite(join(stage, '.env'), encodeEnv(proxySettings));
+      await atomicWrite(join(stage, 'compose.yaml'), renderCompose(proxySettings));
+      await atomicWrite(join(stage, 'compose.env'), encodeEnv({ DATA_DIR: proxySettings.DATA_DIR,
+        ...Object.fromEntries((['runtime', 'cli-proxy-api'] as const).map(service => [imageVariables[service], manifest.images[service]!.id])),
+      }));
+      await compose(['config'], undefined, false, stage);
+      await compose(['run', '--rm', '--no-deps', 'config'], undefined, false, stage);
+      await compose(['up', '-d', '--no-deps', '--force-recreate', 'cli-proxy-api'], undefined, false, stage);
+      await waitFor('cli-proxy-api', 'running');
+      proxyStage = stage;
+    },
+    async discoverInternalModels(manifest, settings) {
+      validateDeploymentImages(manifest, ['runtime']);
+      const endpoint = internalLLM(settings);
+      let result: { models?: unknown; status?: number };
+      try {
+        result = JSON.parse(await run({ command: engine,
+          args: ['run', '--rm', '-i', '--network', network, manifest.images.runtime!.id, '/app/runtime/model-discovery.js', '--stdin'],
+          input: JSON.stringify({ baseUrl: endpoint.baseURL, apiKey: endpoint.apiKey }),
+          label: 'Discover CLIProxyAPI models', timeoutMs: 5000,
+        })) as typeof result;
+      } catch { return []; }
+      if (result?.status === 401 || result?.status === 403) throw new InternalModelAccessError(result.status);
+      if (!Array.isArray(result?.models)) return [];
+      return [...new Set(result.models.filter((id): id is string => typeof id === 'string'
+        && !!id.trim() && id === id.trim() && !/[\x00-\x1f\x7f-\x9f]/.test(id)))];
+    },
     async reservePorts(manifest, settings) {
       await checkProvider();
       return reservePublishedPorts(engine, project, manifest, resolveDeployment(settings).interfaces, run);
@@ -181,7 +230,13 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
       const obsolete = owned.filter(item => !plan.containers.includes(item.service));
       if (obsolete.length) await run({ command: engine, args: ['rm', ...obsolete.map(item => item.id)], label: 'Remove deselected containers; preserve data' });
       await compose(['run', '--rm', '--no-deps', 'config']);
+      proxyStage = undefined;
       const ready = new Set(['config']);
+      if (plan.readiness.some(edge => ['core', 'knowledge'].includes(edge.service) && edge.dependsOn.includes('cli-proxy-api'))) {
+        await compose(['up', '-d', '--no-deps', '--force-recreate', 'cli-proxy-api']);
+        await waitFor('cli-proxy-api', 'running');
+        ready.add('cli-proxy-api');
+      }
       if (plan.services.includes('core')) {
         await compose(['up', '-d', '--no-deps', '--force-recreate', 'core']);
         await waitFor('core', 'healthy');
@@ -228,7 +283,7 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
       return result;
     },
     async hasProviderAuthorization(provider) {
-      const settings = validateEnv(await readEnv(join(directory, '.env')));
+      const settings = validateEnv(await readEnv(join(directory, '.env')), { allowPendingModels: true });
       if (!resolveDeployment(settings).services.includes('cli-proxy-api')) return false;
       const manifest = await loadManifest(join(directory, '.ams/images.json'), ['runtime']);
       const authDirectory = resolve(directory, settings.DATA_DIR, 'cli-proxy-api/auth');
@@ -239,11 +294,11 @@ export function runtimeFor(directory: string, provider: Provider, run: Runner = 
       return output.trim() === 'true';
     },
     async login(provider) {
-      const plan = await readPlan();
+      const plan = resolveDeployment(validateEnv(await readEnv(join(directory, '.env')), { allowPendingModels: true }));
       if (!plan.services.includes('cli-proxy-api')) throw new DeploymentError('Provider login runs on the machine hosting CLIProxyAPI');
-      await compose(['stop', 'cli-proxy-api']);
-      try { await compose(['run', '--rm', '--no-deps', 'cli-proxy-api', '-config', '/config/cli-proxy-api.yaml', accountProviders[provider].loginFlag, '-no-browser'], undefined, true); }
-      finally { await compose(['up', '-d', '--no-deps', 'cli-proxy-api']); }
+      await compose(['stop', 'cli-proxy-api'], undefined, false, proxyStage);
+      try { await compose(['run', '--rm', '--no-deps', 'cli-proxy-api', '-config', '/config/cli-proxy-api.yaml', accountProviders[provider].loginFlag, '-no-browser'], undefined, true, proxyStage); }
+      finally { await compose(['up', '-d', '--no-deps', 'cli-proxy-api'], undefined, false, proxyStage); }
     },
     status: () => compose(['ps']),
   };

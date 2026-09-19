@@ -1,4 +1,5 @@
 import { DeploymentError } from "../runtime/errors.js";
+import { internalModelSource } from '../config/internal-llm.js';
 export const serviceNames = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'mcp'] as const;
 export type Service = typeof serviceNames[number];
 export type Mode = 'local' | 'remote' | 'disabled';
@@ -9,7 +10,7 @@ export const catalog: { value: Service; label: string; description: string }[] =
   { value: 'panel', label: 'Panel', description: 'web interface for managing the stack' },
   { value: 'memory-proxy', label: 'MemoryProxy', description: 'adds memory context to agent requests' },
   { value: 'mcp', label: 'MCP', description: 'Knowledge tools over Streamable HTTP' },
-  { value: 'cli-proxy-api', label: 'CLIProxyAPI', description: 'provides API access to supported AI providers' },
+  { value: 'cli-proxy-api', label: 'CLIProxyAPI', description: 'connects your AI accounts and subscriptions to the stack' },
 ];
 export type Connection = { mode: Mode; required: boolean; consumers: Service[]; endpoint?: string; key?: string; origin?: string };
 export type ServiceInterface = { service: Service | 'access' | 'knowledge-service'; field: string; port: number; target: number; audience: 'user' | 'service' };
@@ -34,6 +35,9 @@ export function selectionFromEnv(env: Record<string, string>): Service[] {
 export function resolveDeployment(env: Record<string, string>, { requireConnections = true }: { requireConnections?: boolean } = {}): Deployment {
   const services = selectionFromEnv(env);
   const has = (service: Service) => services.includes(service);
+  const internalSource = internalModelSource(env);
+  const localInternalModels = internalSource === 'cliproxy' && (has('core') || has('knowledge'));
+  if (localInternalModels && !has('cli-proxy-api')) throw new DeploymentError('INTERNAL_LLM_SOURCE=cliproxy requires cli-proxy-api in AMS_SERVICES for local Core or Knowledge');
   const fields = new Set<string>(['DATA_DIR']);
   const consumers = (names: Service[]) => names.filter(has);
   const connection = (name: string, local: Service, needed: Service[], required: boolean, endpoint?: string, key?: string, origin?: string): Connection => {
@@ -57,7 +61,10 @@ export function resolveDeployment(env: Record<string, string>, { requireConnecti
     ...(has('mcp') ? { endpoint: has('knowledge') ? 'http://access:8080' : env.REMOTE_KNOWLEDGE_TOOLS_URL, key: core.key } : {}) };
   const connections = { core, model, knowledge, panel, proxy, knowledgeTools };
   if (services.some(name => name !== 'cli-proxy-api')) fields.add('LOG_LEVEL');
-  if (has('core') || has('knowledge')) for (const field of ['LLM_BASE_URL', 'LLM_API_KEY']) fields.add(field);
+  if (has('core') || has('knowledge')) {
+    fields.add('INTERNAL_LLM_SOURCE');
+    if (!localInternalModels) for (const field of ['LLM_BASE_URL', 'LLM_API_KEY']) fields.add(field);
+  }
   if (has('core')) for (const field of ['CORE_API_KEY', 'MEMORY_LLM_MODEL', 'MEMORY_LLM_MAX_TOKENS', 'MEMORY_LLM_TIMEOUT_MS', 'MEMORY_PROMPT_MODE']) fields.add(field);
   if (has('knowledge')) for (const field of ['KNOWLEDGE_LLM_MODEL', 'KNOWLEDGE_LLM_MAX_TOKENS', 'KNOWLEDGE_LLM_TIMEOUT_MS', 'KNOWLEDGE_PUBLIC_URL', 'KNOWLEDGE_PORT']) fields.add(field);
   if (has('panel')) for (const field of ['PANEL_PORT', 'PANEL_PUBLIC_URL']) fields.add(field);
@@ -96,6 +103,7 @@ export function resolveDeployment(env: Record<string, string>, { requireConnecti
   if (has('knowledge')) helpers.push('access', 'knowledge-service');
   const containers = [...services, ...helpers];
   const readiness = services.map(service => ({ service, dependsOn: service === 'core' || service === 'cli-proxy-api' ? [] : has('core') ? ['bootstrap'] : [] }));
+  if (localInternalModels) for (const edge of readiness) if (edge.service === 'core' || edge.service === 'knowledge') edge.dependsOn.push('cli-proxy-api');
   if (has('memory-proxy') && has('cli-proxy-api')) readiness.find(edge => edge.service === 'memory-proxy')!.dependsOn.push('cli-proxy-api');
   if (has('mcp') && has('knowledge')) readiness.find(edge => edge.service === 'mcp')!.dependsOn.push('access');
   if (requireConnections) {
