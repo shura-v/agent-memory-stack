@@ -1,7 +1,6 @@
 {
   "name": "agent-memory-stack",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.0.0",
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -11,22 +10,38 @@
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "changeset publish",
     "prepack": "npm run build",
     "check:env": "node dist/runtime/config.js check server",
     "fetch:sources": "node dist/build/cli.js --fetch",
-    "build:images": "node dist/build/cli.js"
+    "build:images": "node dist/build/cli.js",
+    "postbuild": "node --input-type=module -e \"import { copyFileSync } from 'node:fs'; copyFileSync('package-lock.json', 'dist/build/package-lock.json');\""
   },
   "dependencies": {
     "@clack/prompts": "1.8.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.30.0",
-    "@types/node": "24.13.4",
-    "supergateway": "3.4.3",
+    "@changesets/cli": "3.0.3",
+    "@types/node": "24.13.6",
     "typescript": "7.0.2"
   },
   "description": "Interactive setup and container delivery for TencentDB Agent Memory",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shura-v/agent-memory-stack.git"
+  },
+  "homepage": "https://github.com/shura-v/agent-memory-stack#readme",
+  "bugs": {
+    "url": "https://github.com/shura-v/agent-memory-stack/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "ams": "dist/cli.js"
   },
@@ -37,14 +52,13 @@
     "server/.env.example",
     "deploy/**/*.Dockerfile",
     "deploy/debian.sources",
-    "deploy/locks/**",
-    "upstream.lock.json",
+    "vendor/**",
+    "dist/build/package-lock.json",
     "THIRD_PARTY_NOTICES.md",
     "README.md",
     "docs/updating-tdai.md",
+    "docs/native-configs.md",
     "DEFAULTS-AUDIT.md",
-    "patches/ams-access.ts",
-    "patches/ams-features.tsx",
     "VALIDATION.md"
   ]
 }

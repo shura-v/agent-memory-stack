@@ -1,6 +1,10 @@
+import { readInstallationEnv, composeNativeConfiguration, readNativeConfiguration } from '../config/native-state.js';
+import { parseNativeDocument } from '../config/native-documents.js';
 import { join } from 'node:path';
-import { readEnv } from '../config/files.js';
-import { validateEnv } from '../config/settings.js';
+import { nativeTemplateDefinitions, type NativeFileName } from '../config/native-templates.js';
+import { proxyAdminKey } from '../config/native-services.js';
+import { resolveSettings } from '../config/settings.js';
+import { internalLLM, internalModelFields } from '../config/internal-llm.js';
 import { resolveDeployment } from '../deployment/model.js';
 import { listConnectionKeys, readConnectionKey, type ConnectionKey } from '../runtime/connection-keys.js';
 import { DeploymentError } from '../runtime/errors.js';
@@ -11,11 +15,11 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
   options: { listKeys?: typeof listConnectionKeys; readKey?: typeof readConnectionKey } = {}): Promise<void> {
   let env: Record<string, string>;
   try {
-    const raw = await readEnv(join(directory, '.env'));
+    const raw = await readInstallationEnv(directory);
     if (!Object.keys(raw).length) throw new Error();
-    env = validateEnv(raw);
+    env = resolveSettings(raw);
   } catch {
-    throw new DeploymentError('Cannot read saved connection settings. Check .env or run ams and choose Configure stack.');
+    throw new DeploymentError('Cannot read saved connection settings. Check orchestration .env and the recorded native defaults/overrides, or run ams and choose Configure stack.');
   }
   const plan = resolveDeployment(env);
   const port = (service: string) => plan.interfaces.find(item => item.service === service)?.port;
@@ -24,19 +28,15 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
   const keys: (ConnectionKey & { value?: string })[] = [];
   let keyError: string | undefined;
   ui.print(`Show connection details\nSaved configuration from ${directory}; service availability is not checked.\nKeys are visible on this screen; terminal capture can retain them.\n`);
-  if (!plan.services.includes('core')) {
-    keyError = 'Core is not local. Get user keys from the Panel connected to that Core.';
-  } else {
-    try {
-      const provider = await savedProvider(directory);
-      const metadata = await (options.listKeys ?? listConnectionKeys)(directory, provider);
-      for (const key of metadata) {
-        try { keys.push({ ...key, value: await (options.readKey ?? readConnectionKey)(directory, provider, key.keyId) }); }
-        catch { keys.push(key); }
-      }
-    } catch {
-      keyError = 'Cannot read local Core keys. Start Core or use Panel → API Keys.';
+  try {
+    const provider = await savedProvider(directory);
+    const metadata = await (options.listKeys ?? listConnectionKeys)(directory, provider);
+    for (const key of metadata) {
+      try { keys.push({ ...key, value: await (options.readKey ?? readConnectionKey)(directory, provider, key.keyId) }); }
+      catch { keys.push(key); }
     }
+  } catch {
+    keyError = 'Cannot read local Core keys. Start Core or use Panel → API Keys.';
   }
   const userCredentials = (adminOnly = false): string[] => {
     if (keyError) return [keyError];
@@ -61,6 +61,72 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
     ...listener('panel'), ...publicOrigin('panel', 'PANEL_PUBLIC_URL'),
     'Sign in with an administrator key:', ...userCredentials(true),
   ]);
+  const configuration = await readNativeConfiguration(directory);
+  const native = configuration ? composeNativeConfiguration(configuration) : undefined;
+  const fieldSource = (file: NativeFileName, path: string[]): string => {
+    const overlay = configuration?.overrides[file];
+    let value: unknown = overlay === undefined ? undefined : parseNativeDocument(overlay, nativeTemplateDefinitions[file].format);
+    let overridden = false;
+    for (const part of path) {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.hasOwn(value, part)) { overridden = false; break; }
+      value = (value as Record<string, unknown>)[part]; overridden = true;
+    }
+    return `${join(configuration!.root, overridden ? 'overrides' : 'defaults', file)} ${path.join('.')}`;
+  };
+  if (configuration) block('Native configuration', [
+    `Inspect upstream defaults: ${join(configuration.root, 'defaults')}`,
+    `Edit installation overrides: ${join(configuration.root, 'overrides')}`,
+    'Values below are composed from both sets; removing an override restores inheritance.',
+  ]);
+  const admin = native ? proxyAdminKey(native) : undefined;
+  if (admin) block('MemoryProxy — native administration', [`Administrative key (${fieldSource('proxy.yaml', ['admin', 'apiKey'])}):`, admin]);
+  block('Core — internal memory service', [
+    'Compose URL: http://core:8420', ...(port('core') ? listener('core') : ['Host access: not published.']),
+    ...(!env.CORE_API_KEY ? ['Service authentication: disabled (native server.apiKey is empty).'] : native?.['core.yaml'] ? [`Service key (${fieldSource('core.yaml', ['server', 'apiKey'])}):`, env.CORE_API_KEY] : credential('CORE_API_KEY', 'Service key')),
+  ]);
+  block('CLIProxyAPI — model provider access', [
+    'Compose API base URL: http://cli-proxy-api:8317/v1', ...(port('cli-proxy-api') ? listener('cli-proxy-api', '/v1') : ['Host access: not published.']),
+    ...credential('CLIPROXY_API_KEY', 'Service key'),
+  ]);
+  const llm = internalLLM(env);
+  const modelFields = internalModelFields();
+  if (!native && modelFields.length) block('Internal LLM — memory and Knowledge processing', [
+    `Source: ${llm.source === 'cliproxy' ? "this stack's CLIProxyAPI" : 'external API'}`,
+    `API base URL: ${llm.baseURL}`,
+    ...modelFields.map(name => `${name === 'MEMORY_LLM_MODEL' ? 'Core' : 'Knowledge'} model: ${env[name] ?? ''}`),
+    ...credential(llm.source === 'cliproxy' ? 'CLIPROXY_API_KEY' : 'LLM_API_KEY', 'API key'),
+  ]);
+  if (native) {
+    for (const [file, label] of [['core.yaml', 'Core'], ['knowledge.env', 'Knowledge']] as const) {
+      if (!native[file]) continue;
+      const value = parseNativeDocument(native[file]!, file === 'core.yaml' ? 'yaml' : 'env') as Record<string, any>;
+      const llm = file === 'core.yaml' ? value.llm ?? {} : { baseUrl: value.LLM_BASE_URL, model: value.LLM_MODEL, apiKey: value.LLM_API_KEY };
+      block(`${label} — native internal LLM`, [`API base URL: ${llm.baseUrl ?? ''}`, `Source: ${fieldSource(file, file === 'core.yaml' ? ['llm', 'baseUrl'] : ['LLM_BASE_URL'])}`, `Model: ${llm.model ?? ''}`, `Source: ${fieldSource(file, file === 'core.yaml' ? ['llm', 'model'] : ['LLM_MODEL'])}`, `API key (${fieldSource(file, file === 'core.yaml' ? ['llm', 'apiKey'] : ['LLM_API_KEY'])}):`, llm.apiKey ?? '']);
+    }
+  }
+  if (native?.['proxy.yaml']) {
+    const value = parseNativeDocument(native['proxy.yaml'], 'yaml') as { upstream?: { url?: string; apiKey?: string }; tdai?: { endpoint?: string; apiKey?: string } };
+    block('MemoryProxy connections', [`Model API: ${value.upstream?.url ?? ''}`, `Source: ${fieldSource('proxy.yaml', ['upstream', 'url'])}`, `API key (${fieldSource('proxy.yaml', ['upstream', 'apiKey'])}):`, value.upstream?.apiKey ?? '', `Core API: ${value.tdai?.endpoint ?? ''}`, `Source: ${fieldSource('proxy.yaml', ['tdai', 'endpoint'])}`, `API key (${fieldSource('proxy.yaml', ['tdai', 'apiKey'])}):`, value.tdai?.apiKey ?? '']);
+  }
+  if (native?.['knowledge.env']) {
+    const value = parseNativeDocument(native['knowledge.env'], 'env') as Record<string, string>;
+    block('Knowledge connections', [`Panel callback URL: ${value.TMC_CALLBACK_URL ?? ''}`, `Source: ${fieldSource('knowledge.env', ['TMC_CALLBACK_URL'])}`]);
+  }
+  if (native?.['panel-instances.json']) {
+    const value = parseNativeDocument(native['panel-instances.json'], 'json') as { instances?: Array<{ id?: string; gateway_endpoint?: string; api_key?: string }> };
+    const instance = value.instances?.find(item => item.id === 'ams');
+    if (instance) block('Panel connections', [`Core API: ${instance.gateway_endpoint ?? ''}`, `Source: ${fieldSource('panel-instances.json', ['instances'])}`, 'Service key:', instance.api_key ?? '']);
+  }
+  if (!native && env.LLM_API_KEY && (llm.source === 'cliproxy' || !modelFields.length)) block('External internal-model API — saved credentials, inactive', [
+    `API base URL: ${env.LLM_BASE_URL || 'not configured'}`,
+    ...credential('LLM_API_KEY', 'API key'),
+  ]);
+  block('Local or remote?', [
+    'On this machine: use the localhost URLs.',
+    'On another computer: proxy each published port through Caddy and use your HTTPS domains. Preserve the request paths.',
+    'Configure MemoryProxy, MCP, or both.',
+  ]);
+  ui.print('========================================\nAgent connections\n========================================\n');
   block('MemoryProxy — API for your agent with memory', [
     ...listener('memory-proxy'), ...publicOrigin('memory-proxy', 'MEMORY_PROXY_PUBLIC_URL'),
     'Agent Base URL: copy the native endpoint from Panel → API Keys → Client Access Endpoint.',
@@ -70,32 +136,5 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
     ...listener('mcp', '/mcp'), 'Transport: Streamable HTTP', 'Path: /mcp',
     'Search Wiki and code resources. Use one of these user API keys:', ...userCredentials(),
   ]);
-  if (plan.services.includes('core') || env.CORE_API_KEY) block('Core — internal memory service', [
-    ...(plan.services.includes('core') ? ['Compose URL: http://core:8420', ...(port('core') ? listener('core') : ['Host access: not published.'])] : ['Saved credentials; Core is not configured locally.']),
-    ...credential('CORE_API_KEY', 'Service key'),
-  ]);
-  if (plan.services.includes('cli-proxy-api') || env.CLIPROXY_API_KEY) block('CLIProxyAPI — model provider access', [
-    ...(plan.services.includes('cli-proxy-api') ? ['Compose API base URL: http://cli-proxy-api:8317/v1', ...(port('cli-proxy-api') ? listener('cli-proxy-api', '/v1') : ['Host access: not published.'])] : ['Saved credentials; CLIProxyAPI is not configured locally.']),
-    ...credential('CLIPROXY_API_KEY', 'Service key'),
-  ]);
-  if (env.LLM_API_KEY) block('Internal LLM — memory and Knowledge processing', [
-    `API base URL: ${env.LLM_BASE_URL || 'not configured'}`,
-    ...(plan.services.includes('core') || plan.services.includes('knowledge') ? [] : ['Saved credentials; not used by this placement.']),
-    ...(env.MEMORY_LLM_MODEL ? [`Core model: ${env.MEMORY_LLM_MODEL}`] : []),
-    ...(env.KNOWLEDGE_LLM_MODEL ? [`Knowledge model: ${env.KNOWLEDGE_LLM_MODEL}`] : []),
-    ...credential('LLM_API_KEY', 'API key'),
-  ]);
-  for (const remote of [
-    { title: 'Remote Core', mode: plan.connections.core.mode, url: 'REMOTE_CORE_URL', key: 'REMOTE_CORE_API_KEY' },
-    { title: 'Remote model provider', mode: plan.connections.model.mode, url: 'REMOTE_MODEL_BASE_URL', key: 'REMOTE_MODEL_API_KEY' },
-  ]) {
-    if (env[remote.key]) block(`${remote.title} — ${remote.mode === 'remote' ? 'active connection' : 'saved credentials, inactive'}`, [
-      `API base URL: ${env[remote.url] || 'not configured'}`, ...credential(remote.key, 'API key'),
-    ]);
-  }
-  block('Local or remote?', [
-    'On this machine: use the localhost URLs above.',
-    'On another computer: proxy each published port through Caddy and use your HTTPS domains. Preserve the request paths.',
-    'Configure MemoryProxy, MCP, or both.',
-  ]);
+  ui.print('Agent setup guides: https://github.com/shura-v/agent-memory-stack/blob/main/docs/agent-profiles/README.md\n');
 }

@@ -4,19 +4,19 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { runtimeFor, integrationConfig } from '../dist/runtime/compose.js';
+import { runtimeFor } from '../dist/runtime/compose.js';
 import { ProcessFailure } from '../dist/runtime/process.js';
 import { composeDocument, renderCompose } from '../dist/runtime/render-compose.js';
 import { parse } from 'yaml';
 import { resolveDeployment, serviceNames } from '../dist/deployment/model.js';
-import { validateEnv } from '../dist/config/settings.js';
+import { resolveSettings } from '../dist/config/settings.js';
 import { encodeEnv } from '../dist/config/files.js';
 import { imageServices } from '../dist/build/images.js';
 const base = { LLM_BASE_URL:'https://provider.test.invalid/v1', LLM_API_KEY:'synthetic-provider', MEMORY_LLM_MODEL:'memory', KNOWLEDGE_LLM_MODEL:'wiki', CORE_API_KEY:'synthetic-core', CLIPROXY_API_KEY:'synthetic-model' };
 const manifest = { schemaVersion:1, images:Object.fromEntries(imageServices.map((s,i)=>[s,{id:'sha256:'+String(i+1).repeat(64),tag:`${s}:test`,platform:'linux/arm64',repoDigests:[]}])) };
 async function fixture(t, input=base) {
  const dir=await mkdtemp(join(tmpdir(),'ams-compose-'));t.after(()=>rm(dir,{recursive:true,force:true}));
- await mkdir(join(dir,'.ams'));const settings=validateEnv(input);
+ await mkdir(join(dir,'.ams'));const settings=resolveSettings(input);
  await writeFile(join(dir,'.env'),encodeEnv(settings));await writeFile(join(dir,'.ams/images.json'),JSON.stringify(manifest));
  return {dir,settings,project:`ams-${createHash('sha256').update(dir).digest('hex').slice(0,10)}`};
 }
@@ -39,15 +39,13 @@ function runner(project,{pending=[],fatal,owned=[],bootstrapFailure,connectionKe
   return '';
  }};
 }
-test('all explicit service subsets render exactly their local applications and loopback bindings',()=>{
- for(let mask=1;mask<2**serviceNames.length;mask++) {
-  const selected=serviceNames.filter((_,i)=>mask&(1<<i));
-  const env=validateEnv({...base,AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:selected.join(','),REMOTE_KNOWLEDGE_TOOLS_URL:'http://tools.remote',REMOTE_CORE_URL:'http://core.remote',REMOTE_CORE_API_KEY:'remote-core',REMOTE_PANEL_URL:'http://panel.remote',REMOTE_MODEL_BASE_URL:'http://models.remote/v1',REMOTE_MODEL_API_KEY:'remote-model'});
-  const doc=composeDocument(env), plan=resolveDeployment(env);
-  const rendered=renderCompose(env);
-  assert.deepEqual(parse(rendered,{version:'1.1'}),doc,'YAML 1.1 Compose providers preserve scalar types');
-  assert.deepEqual(parse(rendered),doc,'YAML 1.2 preserves scalar types');
-  assert.deepEqual(Object.keys(doc.services).filter(x=>serviceNames.includes(x)).sort(),[...selected].sort());
+test('full stack Compose preserves all applications and optional loopback bindings',()=>{
+ for(const internalSource of ['external', 'cliproxy']) {
+  const env=resolveSettings({...base,INTERNAL_LLM_SOURCE:internalSource});
+  const doc=composeDocument(env), plan=resolveDeployment(env), rendered=renderCompose(env);
+  assert.deepEqual(parse(rendered,{version:'1.1'}),doc);
+  assert.deepEqual(parse(rendered),doc);
+  assert.deepEqual(Object.keys(doc.services).filter(x=>serviceNames.includes(x)).sort(),[...serviceNames].sort());
   assert.deepEqual(Object.keys(doc.services).sort(),[...plan.containers].sort());
   for(const service of Object.values(doc.services)) {
    for(const binding of service.ports??[])assert.match(binding,/^127\.0\.0\.1:/);
@@ -55,7 +53,7 @@ test('all explicit service subsets render exactly their local applications and l
   }
   assert.equal(JSON.stringify(doc).includes('ADMIN_KEY'),false);
  }
- const all=composeDocument(validateEnv(base));assert.equal(Object.values(all.services).flatMap(x=>x.ports??[]).length,3);
+ const all=composeDocument(resolveSettings(base));assert.equal(Object.values(all.services).flatMap(x=>x.ports??[]).length,3);
 });
 test('initialization remains stdin-only and explicit readiness never starts native dependencies',async t=>{
  const {dir,project}=await fixture(t);const r=runner(project);const runtime=runtimeFor(dir,'uvx-podman-compose',r.run);
@@ -67,7 +65,7 @@ test('initialization remains stdin-only and explicit readiness never starts nati
  for(const c of r.commands.filter(c=>c.args.includes('up'))) { assert.ok(c.args.includes('--no-deps')); assert.equal(c.classifyPortConflict,true); }
  assert.ok(r.commands.filter(c=>c.command==='uvx'&&!c.args.includes('up')).every(c=>c.classifyPortConflict===false));
  r.commands.length=0;await runtime.apply();assert.ok(!r.commands.some(c=>c.args.includes('initialize')));
- const inventory=JSON.parse(await readFile(join(dir,'.ams/applied.json'),'utf8'));assert.ok(inventory.services.includes('knowledge-service'));
+ const inventory=JSON.parse(await readFile(join(dir,'.ams/applied.json'),'utf8'));assert.ok(inventory.services.includes('knowledge'));
 });
 test('partial administrator initialization resumes with its existing credential before starting dependent services',async t=>{
  const {dir,project}=await fixture(t);
@@ -158,44 +156,42 @@ test('cancelled key handoff leaves Core uninitialized',async t=>{
  await assert.rejects(runtimeFor(dir,'podman-compose',r.run).apply(undefined,{createAdminKey:async()=>{throw cancelled;}}),error=>error===cancelled);
  assert.ok(!r.commands.some(c=>c.args.includes('initialize')));
 });
-test('CLI-only preflight inspects required images and apply removes only this project containers without volumes',async t=>{
- const {dir,settings,project}=await fixture(t,{AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:'cli-proxy-api',CLIPROXY_API_KEY:'local-key'});
+test('full-stack preflight inspects all images and apply touches only its project containers',async t=>{
+ const {dir,settings,project}=await fixture(t);
  const r=runner(project,{owned:[{id:'old-core',service:'core'},{id:'old-cli',service:'cli-proxy-api'},{id:'user-container',service:'core',project:'unrelated'}]});
  const runtime=runtimeFor(dir,'podman-compose',r.run);
- const subset={schemaVersion:1,images:{'cli-proxy-api':manifest.images['cli-proxy-api'],runtime:manifest.images.runtime}};
- await runtime.preflight(subset,settings);assert.equal(r.commands.filter(c=>c.args[0]==='image').length,2);
+ await runtime.preflight(manifest,settings);assert.equal(r.commands.filter(c=>c.args[0]==='image').length,7);
  await runtime.apply();
- const remove=r.commands.find(c=>c.args[0]==='rm');assert.deepEqual(remove.args,['rm','old-core']);
+ assert.ok(!r.commands.some(c=>c.args[0]==='rm'));
  assert.ok(!r.commands.some(c=>['stop','rm'].includes(c.args[0])&&c.args.includes('user-container')));
- assert.ok(!r.commands.some(c=>c.args.includes('-v')||c.args.includes('--volumes')||c.args.includes('initialize')));
- assert.ok(!r.commands.some(c=>c.args.includes('up')&&c.args.includes('core')));
+ assert.ok(!r.commands.some(c=>c.args.includes('--volumes')||c.args.includes('initialize')));
+ assert.ok(r.commands.some(c=>c.args.includes('up')&&c.args.includes('core')));
 });
-test('remote probes use consuming network and pending differs from rejected authentication',async t=>{
- const {dir,settings,project}=await fixture(t,{AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:'memory-proxy',REMOTE_CORE_URL:'http://core.remote',REMOTE_CORE_API_KEY:'remote-core',REMOTE_MODEL_BASE_URL:'http://models.remote/v1',REMOTE_MODEL_API_KEY:'remote-model'});
- const plan=resolveDeployment(settings);assert.deepEqual(integrationConfig(plan,'preflight').checks.map(x=>x.kind),['core','model']);
- const r=runner(project,{pending:['core']});const runtime=runtimeFor(dir,'podman-compose',r.run);
- assert.deepEqual(await runtime.preflight(manifest,settings),{pending:['core']});
- const probe=r.commands.find(c=>c.args.includes('--stdin'));assert.equal(probe.args[probe.args.indexOf('--network')+1],`${project}_stack`);
- await assert.rejects(runtime.apply(),/Integration is pending/);assert.deepEqual(await runtime.apply(undefined,{allowPending:true}),{pending:['core']});
- const denied=runner(project,{fatal:'Core authentication rejected'});
- await assert.rejects(runtimeFor(dir,'podman-compose',denied.run).preflight(manifest,settings),/Core authentication rejected/);
- assert.ok(!denied.commands.some(c=>c.args.includes('stop')));
+test('readiness uses container health without requiring patched TDAI APIs', async t => {
+ const {dir,settings,project}=await fixture(t);
+ const r=runner(project);const runtime=runtimeFor(dir,'podman-compose',r.run);
+ await runtime.preflight(manifest,settings);
+ await runtime.apply();
+ assert.ok(!r.commands.some(c=>c.args.includes('--stdin') || JSON.stringify(c).includes('/ams/identity')));
+ const failure=async c=>c.args[0]==='inspect'&&c.args.at(-1)==='knowledge'
+   ? JSON.stringify([{State:{Status:'exited',ExitCode:1}}]) : r.run(c);
+ await assert.rejects(runtimeFor(dir,'podman-compose',failure).apply(), /knowledge exited before readiness/);
 });
-test('device login owns only the selected local refresher and restarts after failure',async t=>{
- const {dir,project}=await fixture(t,{AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:'cli-proxy-api',CLIPROXY_API_KEY:'local-key'});
+test('device login owns only the local refresher and restarts after failure',async t=>{
+ const {dir,project}=await fixture(t,base);
  const r=runner(project);const runtime=runtimeFor(dir,'podman-compose',async c=>{if(c.args.includes('-codex-device-login')){r.commands.push(c);throw new Error('login failed');}return r.run(c);});
  await assert.rejects(runtime.login('codex'),/login failed/);assert.ok(r.commands[0].args.includes('stop'));assert.ok(r.commands.at(-1).args.includes('up'));
  const login=r.commands.find(c=>c.args.includes('-codex-device-login'));assert.ok(login.args.includes('-no-browser'));assert.equal(login.interactive,true);
 });
 test('Claude login uses the headless provider flag and no published callback port',async t=>{
- const {dir,project}=await fixture(t,{AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:'cli-proxy-api',CLIPROXY_API_KEY:'local-key',CLIPROXY_AUTH_PROVIDER:'claude'});
+ const {dir,project}=await fixture(t,{...base,CLIPROXY_AUTH_PROVIDER:'claude'});
  const r=runner(project);await runtimeFor(dir,'podman-compose',r.run).login('claude');
  const login=r.commands.find(c=>c.args.includes('-claude-login'));
  assert.ok(login.args.includes('-no-browser'));assert.equal(login.interactive,true);
  assert.ok(!login.args.includes('--service-ports'));assert.ok(!login.args.includes('-codex-device-login'));
 });
 test('saved authorization probe mounts only auth data read-only and asks for the selected provider',async t=>{
- const {dir}=await fixture(t,{AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:'cli-proxy-api',CLIPROXY_API_KEY:'local-key'});
+ const {dir}=await fixture(t,base);
  const commands=[];
  const runtime=runtimeFor(dir,'podman',async c=>{commands.push(c);return c.args.at(-1)==='codex'?'true\n':'false\n';});
  assert.equal(await runtime.hasProviderAuthorization('codex'),true);
@@ -209,13 +205,10 @@ test('saved authorization probe mounts only auth data read-only and asks for the
 
 
 test('MCP uses only generated configuration and starts after protected Knowledge access', () => {
- const doc=composeDocument(validateEnv(base));
- assert.deepEqual(doc.services.mcp.volumes, ['./generated:/config:ro']);
+ const doc=composeDocument(resolveSettings(base));
+ assert.deepEqual(doc.services.mcp.volumes, ['./generated/mcp.json:/config/mcp.json:ro']);
  assert.deepEqual(doc.services.mcp.ports, ['127.0.0.1:8425:8425']);
  assert.deepEqual(doc.services.mcp.depends_on.access, {condition:'service_healthy'});
  assert.equal(doc.services.access.ports, undefined);
- const remote=resolveDeployment(validateEnv({AMS_DEPLOYMENT_VERSION:'1',AMS_SERVICES:'mcp',REMOTE_CORE_URL:'https://core.remote',REMOTE_CORE_API_KEY:'core-key',REMOTE_KNOWLEDGE_TOOLS_URL:'https://tools.remote'}));
- const config=integrationConfig(remote,'preflight');
- assert.deepEqual(config.checks.map(item=>item.kind), ['core','knowledge-tools']);
- assert.deepEqual(config.toolsPairings,[{coreUrl:'https://core.remote',knowledgeToolsUrl:'https://tools.remote',key:'core-key'}]);
+
 });

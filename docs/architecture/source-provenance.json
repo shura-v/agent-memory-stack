@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-19T16:48:48.202Z",
+  "change": "simplify-stock-tdai-integration",
+  "sourceState": "working-tree",
+  "branch": "release/0.1.0",
+  "baseCommit": "0938fde1fff48354c365f644c3574c485fe36519",
+  "note": "Source hashes identify the reviewed working-tree implementation, including stateless per-request SDK/stdio MCP and native configuration changes. Maps describe software connections and configuration contracts; they do not establish deployment or end-to-end runtime success.",
+  "sources": [
+    {
+      "path": "src/deployment/model.ts",
+      "sha256": "54fd76d6a041b3c44ba7f3827620af1824c6a2375b606524c0a2d2095aa0e4af"
+    },
+    {
+      "path": "src/config/internal-llm.ts",
+      "sha256": "f3f3a9e8cec02cba219a1e7deef363f9f5f3a300aa25b7e70597a8f609108b8e"
+    },
+    {
+      "path": "src/config/native-services.ts",
+      "sha256": "ccf34ee39d89aa0d928033517a8469f455e3353f22026053d6444597b1690a62"
+    },
+    {
+      "path": "src/config/native-state.ts",
+      "sha256": "55b3792dcba242fa0f61429fe0af4cbe5d04bdb761af2a79eb6697a22664e0da"
+    },
+    {
+      "path": "src/config/native-templates.ts",
+      "sha256": "1e56f4c9038e0979ceb88f194ad32131a8b95f41e0f1afb0928af595a8ecf94f"
+    },
+    {
+      "path": "src/runtime/render-compose.ts",
+      "sha256": "28bc4cd4c928b933fe57c50a7ec7863cedbad28ba12d4e5849bb0ef71d2ea4fc"
+    },
+    {
+      "path": "src/setup/questions.ts",
+      "sha256": "b5178e7cd8d21d6f1b23e776ffcdc4e59db70b3514ac56ddafbf6b946710675f"
+    },
+    {
+      "path": "src/setup/server.ts",
+      "sha256": "f0ea875eb0ad9c589edb020138250dfd7a4807d1f944a90f9ed0b36e7afc2046"
+    },
+    {
+      "path": "src/config/providers.ts",
+      "sha256": "a8231139ea37ca9dfaf935bb1e4220e79c1ac16ffd9731027ae8f824fbeb9f05"
+    },
+    {
+      "path": "src/runtime/mcp-gateway.ts",
+      "sha256": "92a81e074d09ef855d6ea69d8272773e95678be0e5ae90b908625d0c3ac1948f"
+    },
+    {
+      "path": "src/runtime/access-gateway.ts",
+      "sha256": "eb1187fa789a6dd5206b20c83d01425feab9f572a6a0df269dd50a9b9ae23530"
+    },
+    {
+      "path": "src/runtime/user-auth.ts",
+      "sha256": "4e263c26c6fda78f615f4f94b1246878a9201e68f229b92464482660aa76285e"
+    },
+    {
+      "path": "deploy/node.Dockerfile",
+      "sha256": "d373ecc057a68c55ee856cc04b412582198974dcb26343145518181ad8f51c6b"
+    }
+  ]
+}

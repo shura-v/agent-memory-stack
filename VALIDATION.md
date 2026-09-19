@@ -1,14 +1,155 @@
 # Delivery validation
 
-Updated: 2026-09-19. Tests use synthetic credentials and isolated data. The user's existing stack is outside the test projects.
+Updated: 2026-09-19. Automated tests use synthetic credentials and isolated data. The explicitly approved live-stack check below is separate.
 
-## Acceptance scope
+## MCP process capacity — 2026-09-19
+
+- The stateless gateway permits at most 64 active stdio children globally. At capacity, it returns HTTP 503 to the oldest active request, waits for its transports and child to close, and then admits the new request. The other 63 requests continue unchanged.
+- The focused gateway suite passed 18/18. Two capacity regressions use 64 simultaneous fixture processes and cover FIFO eviction, completed-request slot release, cancellation while waiting for cleanup, and orphan-free teardown.
+- `npm test`: 430 passed, 9 opt-in skipped, 0 failed (439 total). Build/typecheck, strict OpenSpec validation (12/12) and diff checks passed. Container acceptance and the operator's running stack were not changed or rerun.
+
+## Native configuration state removal — 2026-09-19
+
+- AMS does not create, read, rewrite or remove `.ams-state.json`; a file with that name is unrelated operator content. `.ams/tdai-source.json` is the sole source pin, while `.ams/native-config.json` stores only the native root and initial-origin finalization. Readers ignore extra JSON fields.
+- Native backups contain the root, exact defaults, exact overrides and optional deletion declarations. Ordinary Configure and Apply preserve direct edits to defaults; an explicit TDAI update replaces defaults from the verified source and preserves overrides and deletions.
+- `npm test`: 428 passed, 9 opt-in skipped, 0 failed (437 total). The six focused native suites passed 125 tests before the explicit unknown-field regression was added. Typecheck, strict OpenSpec validation (12/12) and diff checks passed. No container or live installation operation was performed.
+
+## Provider endpoint credential prompt — 2026-09-19
+
+- `npm test`: 426 passed, 9 opt-in skipped, 0 failed (435 total). Typecheck, strict OpenSpec validation (12/12), and diff checks passed.
+- Configure now asks for a new masked provider API key immediately when the entered external API base URL differs from its saved value. The unchanged-URL path still offers to keep the saved key.
+- The focused Configure suites passed 47 tests. No provider request, container operation, or live installation change was performed.
+
+## Missing native runtime reference — 2026-09-19 (superseded contract)
+
+- `npm test`: 425 passed, 9 opt-in skipped, 0 failed (434 total). Typecheck, strict OpenSpec validation (12/12) and diff checks passed.
+- The final state-free contract above supersedes the intermediate same-runtime metadata rule. Complete defaults and overrides are adopted directly, and normal saving recreates the reference without owner metadata or template provenance.
+- A read-only check with the built application read the operator's five native defaults while `.ams/native-config.json` remained absent. No operator files were changed; containers were not applied or otherwise validated for this fix.
+
+## Stateless MCP transport — 2026-09-19
+
+- `npm test`: 419 passed, 9 opt-in skipped, 0 failed; `npm run typecheck` passed. Full output: `/private/tmp/ams-root-stateless-full.log`. Removed tests describe deleted session pools/expiry; replacement tests exercise request-owned processes.
+- The focused gateway suite passed 16 cases: fresh child per POST, SDK initialization and tools, concurrent requests with identical IDs, credential isolation/revalidation, unsupported methods, native errors/crashes, disconnect during initialization and execution, and natural gateway shutdown with no orphan child.
+- Isolated Podman linux/arm64 acceptance passed 17 tests with no skips: the 16 transport cases plus the actual unmodified TDAI MCP artifact exposing and calling all 12 tools. Listing matched a direct stock stdio client; caller credentials, denied resources, revoked users and team membership were checked through synthetic Core/Knowledge backends. Log: `/private/tmp/ams-root-stateless-container.log`.
+- Container acceptance mounted the newly compiled `dist` and test files read-only into MCP image `sha256:1d1512076098f0b9a125bb6fcf9186e5c7a1fbe0ea1d26ab3eef9f5888df91c8`, with SDK 1.30.0 and the verified stock Knowledge build. It did not replace the operator's running stack or call a real model provider.
+- The MCP architecture map passed all 9 showcase checks and all 4 desktop viewport checks; dark 1440×900 and light 2048×1320 screenshots were manually inspected. Current code has no credential pool, worker lease, session registry, idle timer or persistent GET stream. Stock TDAI currently advertises tools only; inter-request notifications, reverse requests and subscriptions are not part of this stateless bridge.
+
+An initial full-suite attempt overlapped a worker's clean build and lost compiled files during execution. The serial clean build/full run above passed; the interrupted run is not counted as validation.
+
+## Core service-key removal and root package-lock — 2026-09-19
+
+- `npm test`: 426 passed, 9 opt-in skipped, 0 failed; `npm run typecheck` and `git diff --check` passed. Full-suite output: `/private/tmp/ams-core-key-tests-final.log`.
+- Packed-package check: no shrinkwrap or root lock in the npm archive; the generated `dist/build/package-lock.json` matches the tracked root lock byte-for-byte and supplies the installed package's image build context. MCP image production dependencies installed successfully with `npm ci`; the running image contains SDK 1.30.0 and package-lock.json, without shrinkwrap.
+- User-approved Podman linux/arm64 rebuild and Apply completed for the existing local stack. All seven image fingerprints match current build inputs. Core, Knowledge, Panel, MemoryProxy, Access and MCP report healthy; CLIProxyAPI is running. Core `server.apiKey` is empty; required native Proxy/Panel client token fields use the public stock value `local`. These client fields do not protect Core. The separate Panel Knowledge HTTP token retains its empty native default.
+- Live Core verification without a service Bearer returns HTTP 200 with `valid:true` for the configured user key and `valid:false` for an invalid key. Proxy accepts the configured key through authentication and returns HTTP 400 for an intentionally malformed JSON body; an invalid key returns HTTP 401. Neither response reports the former service-auth HTTP 401. MCP initialize and tools/list return HTTP 200 with 12 tools; an invalid key returns HTTP 401, and the test session was closed. Probe: `/private/tmp/ams-core-no-key-probe.mjs`; no keys are printed or persisted by it.
+- The running Proxy auth source matches the pinned original SHA-256 `736758e8280e6caac253ed66daaed1f86c67b2c0fc0d8d47ff0a744518b25d76`. No TDAI patch was applied. Actual provider inference, memory capture and Wiki operations were not exercised in this pass.
+
+The first Apply exposed stock Panel rejecting an empty instance api_key. Native nonempty client tokens were restored without re-enabling Core service authentication. A subsequent port reservation failed while the old Panel was restarting; stopping that failed container allowed the final Apply to complete. These failures are not counted as successful deployments.
+
+## Earlier stock integration checks — 2026-09-19
+
+Detailed recorded evidence is in [simplify-stock-tdai-integration/validation.md](openspec/changes/simplify-stock-tdai-integration/validation.md). These earlier checks cover flat archive-derived defaults and overrides, unchanged TDAI, and direct SDK HTTP/stdio transport. These are recorded runs, not a new live acceptance run for the documentation refresh.
+
+| Scope | Latest recorded result | Limit |
+| --- | --- | --- |
+| Host suite after native-directory correction | 421 passed, 9 opt-in skipped; typecheck passed | Synthetic fixtures; no live provider |
+| SDK MCP container | 48 checks passed on Podman linux/arm64, Node 24.21.0 | Stock tool schemas and calls, synthetic Core/Knowledge backends |
+| Installed npm archive | Shared root manifest/shrinkwrap and SDK imports passed | Isolated package check |
+| Stock service images | Original TDAI files verified byte-for-byte against the selected archive | Recorded before the later SDK-only MCP rebuild |
+| Full-stack lifecycle | Both local-proxy and external-model modes started, reapplied and restored credentials | Predates SDK transport and later host setup fixes; OAuth stubbed, no real inference |
+
+The recorded stock Proxy/Core authentication failure used a nonempty Core
+service key: native Proxy forwarding received HTTP 401. The subsequent default
+configuration decision removes AMS generation and initial seeding of that key;
+explicit operator values remain supported. The selected native template leaves
+Core service authentication unset, including its guard on native administrative
+routes. This configuration decision does not change TDAI source or establish new
+runtime acceptance. The root lock is now package-lock.json, with a generated
+copy for installed-package container builds; the shrinkwrap entry above records
+the earlier package check. Process readiness does not prove working model
+forwarding, memory capture or Wiki ingestion. Real provider login/inference,
+external agents, Caddy/VPS and non-arm64 acceptance require separate evidence.
+
+## Run current checks
+
+Documentation refresh on 2026-09-19: six configuration/example checks passed;
+all 12 OpenSpec items passed strict validation; 111 local documentation links
+resolved. Both [architecture maps](docs/architecture/README.md) passed all nine
+showcase checks and four desktop viewport checks. Their refreshed screenshots
+were visually reviewed. The landing page also had no horizontal overflow at
+1440×2100 and 390×844. This pass did not rerun the full application suite or
+container acceptance.
+
+From a checkout with Node.js 24 or newer:
+
+```sh
+npm ci
+npm run typecheck
+npm test
+```
+
+The default suite skips nine opt-in cases: five upstream loader cases, two real
+upstream client cases against synthetic HTTP, one stock MCP case and one runtime
+lifecycle case. To build the local image tags and image manifest used by the
+container suites, choose an isolated project directory:
+
+```sh
+npm run build:images -- --runtime podman --project-dir /private/tmp/ams-doc-check
+```
+
+This downloads verified source archives and builds all seven images; it does not
+start an installation. On Linux use an appropriate temporary path. Then run the
+loader and native LLM-client suites serially:
+
+```sh
+AMS_UPSTREAM_CONFIG_TEST=1 AMS_CONTAINER_ENGINE=podman node --test tests/upstream-config.test.mjs
+AMS_UPSTREAM_LLM_TEST=1 AMS_CONTAINER_ENGINE=podman node --test tests/upstream-llm.test.mjs
+```
+
+These fixtures use synthetic credentials and containers without external
+networking. `AMS_TEST_IMAGE_PREFIX` can override the default
+`agent-memory-stack` image prefix. Source-template acquisition on the host may
+need network access or a populated verified archive cache.
+
+For the stock MCP case, point `AMS_STOCK_MCP` at the unchanged built Knowledge
+`dist/mcp/server.mjs` with its runtime dependencies available:
+
+```sh
+AMS_STOCK_MCP=/path/to/knowledge/dist/mcp/server.mjs node --test tests/mcp-stock.test.mjs
+```
+
+The lifecycle fixture creates its own native root, runtime directory and Compose
+project. It starts the complete stack, checks repeat Apply and cold restoration,
+and removes its test containers. It requires Podman plus `uvx podman-compose`
+for these defaults and can rebuild images whose input fingerprints changed:
+
+```sh
+AMS_RUNTIME_SMOKE=1 AMS_CONTAINER_ENGINE=podman AMS_COMPOSE_PROVIDER=uvx-podman-compose AMS_IMAGE_MANIFEST=/private/tmp/ams-doc-check/.ams/images.json node --test tests/runtime-smoke.test.mjs
+AMS_RUNTIME_SMOKE=1 AMS_INTERNAL_PROXY_SMOKE=1 AMS_CONTAINER_ENGINE=podman AMS_COMPOSE_PROVIDER=uvx-podman-compose AMS_IMAGE_MANIFEST=/private/tmp/ams-doc-check/.ams/images.json node --test tests/runtime-smoke.test.mjs
+```
+
+The first command uses the external-model fixture; the second uses local
+CLIProxyAPI and also exercises stock Wiki access against real Core/Knowledge.
+Neither performs provider login, real inference or Wiki ingestion. Run the
+commands sequentially. Override engine/provider settings together when testing
+another runtime.
+
+## Earlier development records
+
+The following records describe earlier implementations. Commands referring to
+removed patches, service placement or removed smoke fixtures are historical,
+not current instructions. They are retained as evidence of what was tested then.
+
+<details>
+<summary>Historical validation before the stock integration</summary>
+
+## Historical acceptance scope
 
 The sole acceptance criterion for the two archived delivery changes is **required images built and selected containers started**. Long-running containers must remain running at the recorded observation point; required one-shot initialization jobs must complete successfully. The local image/startup evidence below records that scope. It does not assert that every later user installation is currently running.
 
 Comprehensive agent, MCP, provider, memory/Wiki, authorization, and full recovery validation is deferred until Supergateway and the remaining integrations are implemented. These checks are outside the archived changes' completion criteria. Existing test results below remain historical evidence; unchecked functional acceptance has not been converted into a pass.
 
-## Current CLI verification
+## Earlier CLI verification
 
 ### MCP lifecycle methods and selected-image exports — 2026-09-19
 
@@ -310,3 +451,5 @@ The earlier six-image archive was approximately **1.5 GiB**. The additional Know
 For semantic acceptance, use a unique test-project fact with a verifiable value. Locate it first in the source conversation, then in Atomic Memory, then in another authorized session's context. For L2/L3, record the actual pipeline trigger conditions and observable outputs rather than expecting every level after one message.
 
 These scenarios are reserved for the later comprehensive validation phase and are outside the acceptance scope of the archived changes. Configuration snapshots preserve settings for retry/rollback; they do not replace cold backups of conversation, Wiki, credentials, or OAuth state. This evidence boundary retains the deployment lessons recorded in `tdai-recap.md`.
+
+</details>

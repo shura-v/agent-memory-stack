@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/super/git/agent-memory-stack/docs/architecture/mcp.json",
+  "output": "/Users/super/git/agent-memory-stack/docs/architecture/mcp.html",
+  "specification": {
+    "sha256": "8726a712bfdf466060beeac29cb4f35342951091bdcb46df465e96a64be1e572",
+    "bytes": 4458
+  },
+  "artifact": {
+    "sha256": "d9d470624ac6b9dc39d802001411f41d29f681613db7ed89e76be66d219d119e",
+    "bytes": 711528
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

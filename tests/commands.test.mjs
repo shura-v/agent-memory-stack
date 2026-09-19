@@ -1,18 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { createTargetStore } from '../dist/setup/targets.js';
 import { executeCommand, parseCommand } from '../dist/cli/commands.js';
 import { Cancelled } from '../dist/setup/interaction.js';
 
-async function fixture(t) {
-  const dir = await mkdtemp(join(tmpdir(), 'ams-targets-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  return { dir, path: join(dir, 'targets.json') };
+async function fixture(t, saved = true) {
+  const directory = await mkdtemp(join(tmpdir(), 'ams-commands-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  if (saved) await writeFile(join(directory, '.env'), 'DATA_DIR="./data"\n');
+  return directory;
 }
+const forbidden = () => assert.fail('Unexpected workflow or side effect');
 
 test('CLI accepts plain apply without target or installation path arguments', () => {
   assert.deepEqual(parseCommand([]), { action: 'setup' });
@@ -24,194 +25,158 @@ test('CLI accepts plain apply without target or installation path arguments', ()
   }
 });
 
-test('saved server location persists across store instances with private permissions', async t => {
-  const { dir, path } = await fixture(t);
-  const targets = createTargetStore(path);
-  assert.equal(await targets.recall('server'), undefined);
-  await targets.remember('server', join(dir, 'one'));
-  const reopened = createTargetStore(path);
-  await reopened.remember('server', join(dir, 'two'));
-  assert.equal(await reopened.recall('server'), join(dir, 'two'));
-  assert.equal((await stat(path)).mode & 0o777, 0o600);
-  assert.deepEqual(Object.keys(JSON.parse(await readFile(path, 'utf8'))).sort(), ['server', 'version']);
-});
-
-test('existing registry extras do not prevent applying or saving the server location', async t => {
-  const { dir, path } = await fixture(t);
-  await writeFile(path, JSON.stringify({ version: 1, server: join(dir, 'server'), client: join(dir, 'profile.json') }));
-  const targets = createTargetStore(path);
-  assert.equal(await targets.recall('server'), join(dir, 'server'));
-  await targets.remember('server', join(dir, 'updated'));
-  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), { version: 1, server: join(dir, 'updated') });
-});
-
-test('invalid target records and relative locations fail instead of guessing', async t => {
-  const { path } = await fixture(t), targets = createTargetStore(path);
-  await assert.rejects(targets.remember('server', './server'), /absolute path/);
-  for (const source of ['broken', JSON.stringify({ version: 2 }), JSON.stringify({ version: 1, server: './server' }), JSON.stringify({ version: 1, secret: 'do-not-log' })]) {
-    await writeFile(path, source);
-    await assert.rejects(targets.recall('server'), error => /Cannot read saved setup locations/.test(error.message) && !error.message.includes('do-not-log'));
-  }
-});
-
-test('standalone apply routes the remembered absolute path without setup questions', async t => {
-  const { dir, path } = await fixture(t), targets = createTargetStore(path);
+test('standalone apply uses the fixed configuration directory without reading an old targets registry', async t => {
+  const directory = await fixture(t);
+  const registry = join(directory, 'targets.json');
+  await writeFile(registry, 'obsolete registry deliberately not valid JSON');
   const calls = [];
-  const ui = { note() {} };
-  const workflows = {
-    setupServer: async () => assert.fail('must not run setup'),
-    applyServer: async (_ui, path) => calls.push(['server', path]),
-  };
-  await assert.rejects(executeCommand(parseCommand(['apply']), ui, { targets, workflows }), /No saved configuration/);
-  const location = join(dir, 'server');
-  await targets.remember('server', location);
-  await executeCommand(parseCommand(['apply']), ui, { targets, workflows });
-  assert.deepEqual(calls, [['server', location]]);
+  await executeCommand(parseCommand(['apply']), { note() {} }, { directory,
+    workflows: { setupServer: forbidden, applyServer: async (_ui, path) => calls.push(path) },
+  });
+  assert.deepEqual(calls, [directory]);
+  assert.equal(await readFile(registry, 'utf8'), 'obsolete registry deliberately not valid JSON');
 });
 
-test('TDAI update uses the saved installation and applies it after resolving the revision', async () => {
+test('missing .env stops apply, update and connection details with setup-first guidance', async t => {
+  const directory = await fixture(t, false);
+  for (const action of ['apply', 'update-tdai', 'connections']) {
+    await assert.rejects(executeCommand({ action: action === 'connections' ? 'setup' : action }, {
+      note() {}, select: async () => 'connections',
+    }, { directory, updateTdai: forbidden, showConnectionDetails: forbidden,
+      detectInstallation: forbidden, workflows: { setupServer: forbidden, applyServer: forbidden },
+    }), /No saved configuration.*Configure stack first/);
+  }
+  assert.deepEqual(await readdir(directory), []);
+});
+
+test('TDAI update uses the fixed installation and applies it after resolving the revision', async t => {
+  const directory = await fixture(t);
   const calls = [], notes = [];
-  const forbidden = () => assert.fail('update must not configure or inspect a new installation');
-  const targets = { recall: async target => {
-    assert.equal(target, 'server');
-    return '/tmp/saved-stack';
-  }, remember: forbidden };
   await executeCommand(parseCommand(['update', 'tdai']), { note: (...args) => notes.push(args) }, {
-    targets,
-    detectInstallation: forbidden,
-    updateTdai: async path => {
-      calls.push(['update', path]);
-      return { previousRevision: 'previous-revision', revision: 'new-revision' };
-    },
-    workflows: { setupServer: forbidden, applyServer: async (_ui, path, options) => {
-      assert.equal(options.targets, targets);
-      calls.push(['apply', path]);
-    } },
+    directory, detectInstallation: forbidden,
+    updateTdai: async path => { calls.push(['update', path]); return { previousRevision: 'previous-revision', revision: 'new-revision' }; },
+    workflows: { setupServer: forbidden, applyServer: async (_ui, path) => calls.push(['apply', path]) },
   });
-  assert.deepEqual(calls, [['update', '/tmp/saved-stack'], ['apply', '/tmp/saved-stack']]);
+  assert.deepEqual(calls, [['update', directory], ['apply', directory]]);
   assert.match(notes.find(([, title]) => title === 'TDAI revision')[0], /previous-revision → new-revision/);
 });
 
-test('TDAI update requires a saved installation before downloading or applying', async () => {
-  const forbidden = () => assert.fail('missing target must stop before update or apply');
-  await assert.rejects(executeCommand(parseCommand(['update', 'tdai']), { note: forbidden }, {
-    targets: { recall: async () => undefined, remember: forbidden },
-    updateTdai: forbidden,
-    detectInstallation: forbidden,
-    workflows: { setupServer: forbidden, applyServer: forbidden },
-  }), /No saved configuration/);
-});
-
-test('failed TDAI update does not apply the installation', async () => {
-  const forbidden = () => assert.fail('failed update must not apply');
+test('failed TDAI update does not apply the installation', async t => {
+  const directory = await fixture(t);
   const failure = new Error('source unavailable');
   await assert.rejects(executeCommand(parseCommand(['update', 'tdai']), { note() {} }, {
-    targets: { recall: async () => '/tmp/saved-stack', remember: forbidden },
-    updateTdai: async () => { throw failure; },
-    detectInstallation: forbidden,
+    directory, updateTdai: async () => { throw failure; }, detectInstallation: forbidden,
     workflows: { setupServer: forbidden, applyServer: forbidden },
   }), error => error === failure);
 });
 
-test('Configure stack forwards its target store', async () => {
-  const targets = { recall: async () => undefined, remember: async () => {} };
+test('Configure stack forwards the fixed directory without creating a targets registry', async t => {
+  const directory = await fixture(t, false);
   const calls = [];
   await executeCommand(parseCommand([]), { note() {}, select: async (_id, _message, options, initial) => {
     assert.deepEqual(options.map(option => option.label), ['Configure stack', 'Apply configuration', 'Show connection details']);
     assert.equal(initial, 'configure');
     return 'configure';
-  } }, {
-    targets,
-    detectInstallation: async () => undefined,
-    workflows: {
-      setupServer: async (_ui, options) => { calls.push(options.targets); },
-      applyServer: async () => assert.fail('setup decides when to apply'),
-    },
+  } }, { directory, detectInstallation: async () => undefined,
+    workflows: { setupServer: async (_ui, options) => calls.push(options), applyServer: forbidden },
   });
-  assert.deepEqual(calls, [targets]);
+  assert.deepEqual(calls, [{ directory }]);
+  assert.deepEqual(await readdir(directory), []);
 });
 
-test('existing stack is checked after Configure stack and before target lookup or setup effects', async () => {
-  const notes = [];
-  const calls = [];
-  const forbidden = () => assert.fail('existing stack must not enter setup or read another target');
-  await executeCommand(parseCommand([]), { note: (...args) => notes.push(args), select: async id => {
-    assert.equal(id, 'action');
-    calls.push('menu');
-    return 'configure';
-  } }, {
-    detectInstallation: async () => {
-      calls.push('detect');
-      return { engine: 'podman', project: 'ams-1234567890', directory: '/tmp/existing stack' };
-    },
-    targets: { recall: forbidden, remember: forbidden },
-    workflows: { setupServer: forbidden, applyServer: forbidden },
-  });
-  assert.deepEqual(calls, ['menu', 'detect']);
-  const existing = notes.find(([, title]) => title === 'Stack already configured');
-  assert.match(existing[0], /Edit \/tmp\/existing stack\/\.env/);
+test('existing stack guard runs after menu selection and gives truthful existing Compose guidance', async t => {
+  const directory = await fixture(t, false);
+  for (const location of [directory, join(directory, 'other stack'), undefined]) {
+    const notes = [], calls = [];
+    await executeCommand(parseCommand([]), { note: (...args) => notes.push(args), select: async id => {
+      assert.equal(id, 'action'); calls.push('menu'); return 'configure';
+    } }, { directory, detectInstallation: async () => {
+      calls.push('detect'); return { engine: 'podman', project: 'ams-1234567890', directory: location };
+    }, workflows: { setupServer: forbidden, applyServer: forbidden } });
+    assert.deepEqual(calls, ['menu', 'detect']);
+    const message = notes.find(([, title]) => title === 'Stack already configured')[0];
+    if (location === directory) assert.match(message, /Apply saved changes with: ams apply/);
+    else { assert.doesNotMatch(message, /ams apply/); assert.match(message, /manually.*Compose project and configuration/); }
+  }
 });
 
 test('cancelling the menu does not inspect containers or enter setup', async () => {
-  const forbidden = () => assert.fail('cancelled menu must not inspect containers or enter setup');
   await assert.rejects(executeCommand(parseCommand([]), {
     note() {}, select: async () => { throw new Cancelled(); },
-  }, {
-    detectInstallation: forbidden,
-    targets: { recall: forbidden, remember: forbidden },
-    workflows: { setupServer: forbidden, applyServer: forbidden },
-  }), Cancelled);
+  }, { detectInstallation: forbidden, workflows: { setupServer: forbidden, applyServer: forbidden } }), Cancelled);
 });
 
-test('remembered target resolves from a different process working directory', async t => {
-  const { dir, path } = await fixture(t);
-  const location = join(dir, 'server');
-  await createTargetStore(path).remember('server', location);
-  const moduleUrl = new URL('../dist/setup/targets.js', import.meta.url).href;
-  const source = `import {createTargetStore} from ${JSON.stringify(moduleUrl)}; console.log(await createTargetStore(process.argv[1]).recall('server'));`;
-  assert.equal(execFileSync(process.execPath, ['--input-type=module', '-e', source, path], { cwd: tmpdir(), encoding: 'utf8' }).trim(), location);
+test('default configuration location is fixed under home regardless of working directory or XDG_CONFIG_HOME', async t => {
+  const home = await fixture(t, false);
+  const directory = join(home, '.agent-memory-stack');
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, '.env'), 'DATA_DIR="./data"\n');
+  const commandsUrl = new URL('../dist/cli/commands.js', import.meta.url).href;
+  const source = `import {executeCommand} from ${JSON.stringify(commandsUrl)}; await executeCommand({action:'apply'},{note(){}},{workflows:{setupServer(){throw Error('setup')},async applyServer(_ui,path){console.log(path)}}});`;
+  for (const cwd of [home, directory]) {
+    const actual = execFileSync(process.execPath, ['--input-type=module', '-e', source], {
+      cwd, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, 'other') },
+    }).trim();
+    assert.equal(actual, directory);
+  }
+  assert.deepEqual(await readdir(directory), ['.env']);
 });
 
-test('menu Apply configuration uses the saved target without the Configure stack guard', async () => {
+test('menu Apply uses the fixed directory without the Configure stack guard', async t => {
+  const directory = await fixture(t);
   const calls = [];
-  const forbidden = () => assert.fail('Apply must not enter Configure stack');
-  const targets = { recall: async target => { assert.equal(target, 'server'); return '/tmp/saved-stack'; }, remember: forbidden };
-  const workflows = { setupServer: forbidden, applyServer: async (_ui, path) => calls.push(path) };
   await executeCommand(parseCommand([]), { note() {}, select: async id => { assert.equal(id, 'action'); return 'apply'; } }, {
-    targets, workflows, detectInstallation: forbidden,
+    directory, workflows: { setupServer: forbidden, applyServer: async (_ui, path) => calls.push(path) }, detectInstallation: forbidden,
   });
-  assert.deepEqual(calls, ['/tmp/saved-stack']);
+  assert.deepEqual(calls, [directory]);
 });
 
-test('help and invalid arguments work without a TTY or configuration', () => {
+test('help documents the fixed configuration location without a TTY or configuration', () => {
   const cli = new URL('../dist/cli.js', import.meta.url);
   const output = execFileSync(process.execPath, [cli.pathname, '--help'], { encoding: 'utf8' });
   assert.match(output, /ams apply\s+Apply saved configuration/);
   assert.match(output, /ams update tdai\s+Update TDAI and apply saved configuration/);
-  assert.doesNotMatch(output, /apply server/);
-  assert.doesNotMatch(output, /client/i);
-  assert.doesNotMatch(output, /prepared server images/);
+  assert.match(output, /~\/\.agent-memory-stack/);
+  assert.doesNotMatch(output, /most recently saved|apply server|client|prepared server images/i);
   assert.throws(() => execFileSync(process.execPath, [cli.pathname, 'apply', './server'], { stdio: 'pipe' }), error => {
-    assert.match(error.stderr.toString(), /Usage: ams/);
-    return error.status === 1;
+    assert.match(error.stderr.toString(), /Usage: ams/); return error.status === 1;
   });
 });
 
-test('Show connection details uses the remembered installation without configuring or applying', async () => {
-  const forbidden = () => assert.fail('Connection details must not configure, apply, or inspect the setup guard');
+test('Show connection details uses the fixed directory without configuring or applying', async t => {
+  const directory = await fixture(t);
   let shown;
   await executeCommand(parseCommand([]), { note() {}, select: async () => 'connections' }, {
-    targets: { recall: async () => '/tmp/saved-stack', remember: forbidden },
-    workflows: { setupServer: forbidden, applyServer: forbidden }, detectInstallation: forbidden,
-    showConnectionDetails: async (_ui, directory) => { shown = directory; },
+    directory, workflows: { setupServer: forbidden, applyServer: forbidden }, detectInstallation: forbidden,
+    showConnectionDetails: async (_ui, path) => { shown = path; },
   });
-  assert.equal(shown, '/tmp/saved-stack');
+  assert.equal(shown, directory);
 });
 
 test('TDAI update requires an interactive terminal before reading configuration or downloading', () => {
   const cli = new URL('../dist/cli.js', import.meta.url);
   assert.throws(() => execFileSync(process.execPath, [cli.pathname, 'update', 'tdai'], { stdio: 'pipe' }), error => {
-    assert.match(error.stderr.toString(), /Run ams in an interactive terminal/);
-    return error.status === 1;
+    assert.match(error.stderr.toString(), /Run ams in an interactive terminal/); return error.status === 1;
   });
+});
+
+test('existing native stack guidance names recorded defaults and overrides without guessing a root', async t => {
+  const directory = await fixture(t, false);
+  for (const nativeRoot of [join(directory, 'custom-native'), undefined]) {
+    const notes = [];
+    await executeCommand(parseCommand([]), { note: text => notes.push(text), select: async () => 'configure' }, {
+      directory,
+      detectInstallation: async () => ({ engine: 'podman', project: 'ams-1234567890', directory, nativeRoot }),
+      workflows: { setupServer: forbidden, applyServer: forbidden },
+    });
+    const guidance = notes.join('\n');
+    if (nativeRoot) {
+      assert.ok(guidance.includes(join(nativeRoot, 'defaults')));
+      assert.ok(guidance.includes(join(nativeRoot, 'overrides')));
+    } else {
+      assert.match(guidance, /saved native configuration reference/);
+      assert.doesNotMatch(guidance, /\.config\/agent-memory-stack|custom-native/);
+    }
+    assert.match(guidance, /ams apply/);
+  }
 });

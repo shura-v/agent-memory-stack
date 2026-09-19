@@ -1,0 +1,273 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Agent Memory Stack",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      890
+    ]
+  },
+  "components": [
+    {
+      "id": "agent",
+      "type": "external",
+      "label": "Your agent",
+      "sublabel": "Codex / Claude Code",
+      "pos": [
+        33,
+        335
+      ],
+      "size": [
+        235,
+        88
+      ]
+    },
+    {
+      "id": "memoryproxy",
+      "type": "backend",
+      "label": "MemoryProxy",
+      "sublabel": "Agent API + memory context",
+      "tag": "127.0.0.1:8096",
+      "pos": [
+        371,
+        80
+      ],
+      "size": [
+        235,
+        88
+      ]
+    },
+    {
+      "id": "cliproxy",
+      "type": "backend",
+      "label": "CLIProxyAPI",
+      "sublabel": "ChatGPT / Claude account access",
+      "pos": [
+        732,
+        80
+      ],
+      "size": [
+        235,
+        88
+      ]
+    },
+    {
+      "id": "panel",
+      "type": "frontend",
+      "label": "Panel",
+      "sublabel": "Users, keys and resources",
+      "tag": "127.0.0.1:8123",
+      "pos": [
+        371,
+        340
+      ],
+      "size": [
+        235,
+        88
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "Core",
+      "sublabel": "Memory + identity + permissions",
+      "pos": [
+        732,
+        340
+      ],
+      "size": [
+        245,
+        88
+      ]
+    },
+    {
+      "id": "model_source",
+      "type": "backend",
+      "label": "Internal model source",
+      "sublabel": "Configuration: choose ONE route",
+      "pos": [
+        1093,
+        340
+      ],
+      "size": [
+        245,
+        88
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "security",
+      "label": "AMS MCP gateway",
+      "sublabel": "SDK HTTP ↔ stock stdio MCP",
+      "tag": "127.0.0.1:8425",
+      "pos": [
+        371,
+        650
+      ],
+      "size": [
+        235,
+        88
+      ]
+    },
+    {
+      "id": "access",
+      "type": "security",
+      "label": "AMS access bridge",
+      "sublabel": "User + team + resource ACL",
+      "pos": [
+        732,
+        650
+      ],
+      "size": [
+        245,
+        88
+      ]
+    },
+    {
+      "id": "knowledge",
+      "type": "backend",
+      "label": "Knowledge",
+      "sublabel": "Wiki and code tools",
+      "pos": [
+        1093,
+        650
+      ],
+      "size": [
+        245,
+        88
+      ]
+    },
+    {
+      "id": "external_models",
+      "type": "external",
+      "label": "External model API",
+      "sublabel": "Optional independent provider",
+      "pos": [
+        1093,
+        80
+      ],
+      "size": [
+        245,
+        88
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "agent-model-api",
+      "from": "agent",
+      "to": "memoryproxy",
+      "label": "Base URL + user key",
+      "variant": "emphasis"
+    },
+    {
+      "id": "proxy-provider-api",
+      "from": "memoryproxy",
+      "to": "cliproxy",
+      "label": "Inference",
+      "variant": "emphasis"
+    },
+    {
+      "id": "memory-read-write",
+      "from": "memoryproxy",
+      "to": "core",
+      "label": "Read / write memory"
+    },
+    {
+      "id": "panel-admin",
+      "from": "panel",
+      "to": "core",
+      "label": "Admin API",
+      "labelAt": [
+        660,
+        418
+      ]
+    },
+    {
+      "id": "core-model",
+      "from": "core",
+      "to": "model_source",
+      "label": "Core model",
+      "labelAt": [
+        1035,
+        425
+      ]
+    },
+    {
+      "id": "agent-mcp",
+      "from": "agent",
+      "to": "mcp",
+      "label": "MCP + user key",
+      "variant": "security"
+    },
+    {
+      "id": "mcp-tool-api",
+      "from": "mcp",
+      "to": "access",
+      "label": "Knowledge tool calls",
+      "variant": "security"
+    },
+    {
+      "id": "acl-check",
+      "from": "access",
+      "to": "core",
+      "label": "Authorize",
+      "variant": "security"
+    },
+    {
+      "id": "authorized-tool",
+      "from": "access",
+      "to": "knowledge",
+      "label": "Authorized HTTP"
+    },
+    {
+      "id": "knowledge-model",
+      "from": "knowledge",
+      "to": "model_source",
+      "label": "Knowledge model"
+    },
+    {
+      "id": "shared-internal-models",
+      "from": "model_source",
+      "to": "cliproxy",
+      "label": "Default: shared",
+      "variant": "emphasis"
+    },
+    {
+      "id": "external-internal-models",
+      "from": "model_source",
+      "to": "external_models",
+      "label": "OR: external API",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "One full stack",
+      "items": [
+        "All six applications run together with config/bootstrap/access helpers.",
+        "Core and Knowledge use CLIProxyAPI or an external model API."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Stock TDAI",
+      "items": [
+        "MemoryProxy, Core, Knowledge and Panel run unchanged upstream code.",
+        "Panel talks directly to Knowledge; Knowledge calls back to Panel."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Native configuration",
+      "items": [
+        "Upstream defaults + user overrides live in ~/.config/agent-memory-stack.",
+        "Configure selects models. Apply composes saved files and mounts them."
+      ]
+    }
+  ]
+}

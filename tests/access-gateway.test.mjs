@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createGatewayHandler, gatewayConfig } from '../dist/runtime/access-gateway.js';
-import { amsAuthorizeBridge, amsAssetAllowed, amsFilterSkills, amsFilterListing, amsPublicRoute, amsPublicOrigin, amsGuardRequest, amsAssertSessionOwner } from '../patches/ams-access.ts';
 
 const user = 'usr-alice';
 function backend(options = {}) {
@@ -14,10 +13,13 @@ function backend(options = {}) {
     let data;
     if (route.endsWith('/auth/verify')) data = { valid: body.user_key === 'alice-key', user: { user_id: user } };
     else if (route.endsWith('/user/list-by-instance')) data = { total: options.inactive ? 0 : 1, items: options.inactive ? [] : [{ user_id: user, status: 'active' }] };
-    else if (route.endsWith('/asset/get')) data = { asset_id: body.asset_id, asset_type: 'llm_wiki', team_id: 'team-one', status: 'active' };
+    else if (route.endsWith('/asset/get')) data = { asset_id: body.asset_id, asset_type: options.assetType ?? (body.asset_id.startsWith('cg-') ? 'code_graph' : 'llm_wiki'), team_id: 'team-one', status: 'active' };
     else if (route.endsWith('/acl/check')) data = { allowed: !options.denied && body.asset_id !== 'private' && body.asset_id !== 'restricted' && body.user_id === user };
     else if (route.endsWith('/team-member/get')) data = { user_id: user, team_id: 'team-one', status: options.removed ? 'removed' : 'active' };
-    else data = { answer: 'allowed content' };
+    else {
+      if (options.nativeResponse) return new Response(options.nativeResponse.body, { status: options.nativeResponse.status, headers: { 'content-type': 'application/json' } });
+      data = { answer: 'allowed content' };
+    }
     if (options.unavailable && route.includes('/meta/')) throw new Error('secret alice-key backend-secret');
     return Response.json({ code: 0, data });
   };
@@ -26,7 +28,7 @@ function backend(options = {}) {
 
 async function fixture(t, options = {}) {
   const upstream = backend(options);
-  const config = gatewayConfig({ CORE_API_KEY: 'backend-secret' });
+  const config = gatewayConfig(options.withoutServiceKey ? {} : { CORE_API_KEY: 'backend-secret' });
   const server = http.createServer(createGatewayHandler(config, upstream.fetcher));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -119,92 +121,64 @@ test('gateway configuration enforces the single ams instance', () => {
   assert.throws(() => gatewayConfig({ CORE_API_KEY: 'backend-secret', TDAI_SERVICE_ID: 'other' }), /must be ams/);
 });
 
-test('public MemoryProxy routes are bounded at its own entry point', () => {
-  for (const path of ['/codex/ams/v1/responses', '/codex/ams/v1/responses/compact',
-    '/codebuddy/ams/v1/chat/completions', '/hermes/ams/v1/chat/completions', '/claude-code/ams/v1/messages',
-    '/memory-bridge/v3/atomic/search', '/skill-bridge/v3/skill/files/read']) {
-    assert.equal(amsPublicRoute('POST', 'https://api.example' + path), true);
+const nativeRoutes = [
+  ...['search', 'explore', 'callers', 'callees', 'impact', 'node', 'status', 'files'].map(action => [`/v3/code-graph/${action}`, 'code_graph_id', 'cg-one']),
+  ...['search', 'page/read', 'page/ls', 'graph'].map(action => [`/v3/wiki/${action}`, 'wiki_id', 'wiki-one']),
+];
+for (const [path, field, resource] of nativeRoutes) test(`stock MCP ${path} authorizes its resource and forwards its native body`, async t => {
+  const f = await fixture(t);
+  const body = { [field]: resource, query: 'literal ${query}', refs: ['page'], custom: { retained: true } };
+  const response = await fetch(f.url + path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer alice-key' }, body: JSON.stringify(body) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(f.calls.find(call => call.route.endsWith('/acl/check')).body, { user_id: user, asset_id: resource, action: 'use' });
+  const forwarded = f.calls.at(-1);
+  assert.equal(forwarded.route, path);
+  assert.deepEqual(forwarded.body, body);
+  assert.equal(forwarded.headers['x-tdai-service-id'], 'ams');
+  assert.equal(forwarded.headers.authorization, 'Bearer alice-key', 'stock forwarding never substitutes the Core service credential');
+});
+
+test('stock resource type, tenant, user status and live ACL remain enforced before forwarding', async t => {
+  const state = {};
+  const f = await fixture(t, state);
+  const request = (patch = {}, headers = {}) => fetch(f.url + '/v3/wiki/search', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer alice-key', ...headers },
+    body: JSON.stringify({ wiki_id: 'wiki-one', query: 'test', ...patch }),
+  });
+  assert.equal((await request()).status, 200);
+  const initial = f.calls.filter(call => call.route === '/v3/wiki/search').length;
+  state.denied = true; assert.equal((await request()).status, 403); state.denied = false;
+  state.removed = true; assert.equal((await request()).status, 403); state.removed = false;
+  state.inactive = true; assert.equal((await request()).status, 403); state.inactive = false;
+  state.assetType = 'code_graph'; assert.equal((await request()).status, 403); delete state.assetType;
+  assert.equal((await request({}, { 'x-tdai-service-id': 'other' })).status, 403);
+  assert.equal((await request({}, { authorization: 'Bearer bob-key' })).status, 401);
+  assert.equal((await request({ wiki_id: undefined, code_graph_id: 'cg-one' })).status, 400);
+  assert.equal(f.calls.filter(call => call.route === '/v3/wiki/search').length, initial);
+});
+
+test('stock errors preserve response bytes and never retry with elevated credentials', async t => {
+  const nativeResponse = { status: 403, body: '{"code":403,"message":"native denied","data":null}' };
+  const f = await fixture(t, { nativeResponse });
+  const response = await fetch(f.url + '/v3/wiki/search', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer alice-key' }, body: '{"wiki_id":"wiki-one","query":"test"}' });
+  assert.equal(response.status, 403); assert.equal(await response.text(), nativeResponse.body);
+  const calls = f.calls.filter(call => call.route === '/v3/wiki/search');
+  assert.equal(calls.length, 1); assert.equal(calls[0].headers.authorization, 'Bearer alice-key');
+});
+
+test('stock route bridge rejects create/delete/admin and unknown routes', async t => {
+  const f = await fixture(t);
+  for (const path of ['/v3/wiki/create', '/v3/wiki/delete', '/v3/code-graph/sync', '/v3/wiki/raw/read', '/v3/wiki/search?url=http://other', '/v3/wiki/new-tool']) {
+    assert.equal((await f.request({}, { path })).status, 404);
   }
-  for (const path of ['/direct/v1/responses', '/codex/other/v1/responses', '/v3/instance/proxy-destroy',
-    '/v3/admin/rate-limits', '/skill-bridge/v3/skill/delete', '/v3/internal/meta/user/init-admin']) {
-    assert.equal(amsPublicRoute('POST', 'https://api.example' + path), false);
-  }
-  assert.equal(amsPublicRoute('GET', 'https://api.example/codex/ams/v1/responses'), false);
-  assert.equal(amsPublicRoute('POST', 'https://api.example/codex/ams/v1/responses?target=other'), false);
+  assert.equal(f.calls.length, 0);
 });
 
-test('tool origins accept HTTP and HTTPS hosts while rejecting non-origin URL parts', () => {
-  for (const name of ['AMS_KNOWLEDGE_URL', 'AMS_PROXY_URL']) {
-    const old = process.env[name];
-    try {
-      for (const value of ['https://knowledge.example', 'http://localhost:8422', 'http://192.168.1.20:8422',
-        'http://[::1]:8422', 'http://memory.lan:8096']) {
-        process.env[name] = value + '/';
-        assert.equal(amsPublicOrigin(name), value);
-      }
-      for (const value of ['https://knowledge.example/v3', 'http://localhost:8422/v3',
-        'https://user:secret@knowledge.example', 'http://user:secret@localhost:8422',
-        'http://localhost:8422?key=value', 'https://knowledge.example#fragment', 'ftp://memory.lan']) {
-        process.env[name] = value;
-        assert.throws(() => amsPublicOrigin(name));
-      }
-    } finally { old === undefined ? delete process.env[name] : process.env[name] = old; }
-  }
-});
-
-test('cached session ownership cannot change to another authenticated user', () => {
-  const state = { userId: user, sessionInfo: { user_id: user } };
-  assert.doesNotThrow(() => amsAssertSessionOwner(state, user));
-  assert.throws(() => amsAssertSessionOwner(state, 'victim'), /another user/);
-  assert.equal(state.userId, user);
-});
-
-test('patched bridge rejects stolen session, wrong instance and removed member', async t => {
-  const previous = { fetch: globalThis.fetch, key: process.env.CORE_API_KEY, service: process.env.TDAI_SERVICE_ID };
-  process.env.CORE_API_KEY = 'backend-secret';
-  process.env.TDAI_SERVICE_ID = 'ams';
-  t.after(() => { globalThis.fetch = previous.fetch; for (const [name, value] of [['CORE_API_KEY', previous.key], ['TDAI_SERVICE_ID', previous.service]]) value === undefined ? delete process.env[name] : process.env[name] = value; });
-  globalThis.fetch = backend().fetcher;
-  const request = new Request('https://api.example/codex/ams/v1/responses', { method: 'POST', headers: { authorization: 'Bearer alice-key' }, body: '{"model":"upstream-model"}' });
-  assert.equal(await amsGuardRequest(request), null);
-  assert.equal(request.bodyUsed, false, 'guard does not consume model body');
-  assert.equal((await amsGuardRequest(new Request('https://api.example/direct/v1/responses', { method: 'POST' }))).status, 404);
-  assert.equal((await amsGuardRequest(new Request('https://api.example/codex/ams/v1/responses', { method: 'POST' }))).status, 401);
-  const headers = n => ({ authorization: 'Bearer alice-key', 'x-tdai-service-id': 'ams' })[n];
-  const ids = { user_id: user, team_id: 'team-one', space_id: 'ams' };
-  assert.equal(await amsAuthorizeBridge(headers, { ...ids, user_id: 'victim' }), false);
-  assert.equal(await amsAuthorizeBridge(headers, { ...ids, space_id: 'other' }), false);
-  assert.equal(await amsAuthorizeBridge(headers, ids), true);
-  assert.equal(ids.user_key, 'alice-key');
-  assert.equal(await amsAssetAllowed('alice-key', user, 'private'), false);
-  const result = JSON.parse(await amsFilterSkills(JSON.stringify({ code: 0, data: { items: [{ skill_id: 'shared' }, { skill_id: 'private' }, { skill_id: 'restricted' }] } }), ids));
-  assert.deepEqual(result.data.items, [{ skill_id: 'shared' }]);
-  const listing = await amsFilterListing('<available_skills>\n- id=shared, name=Allowed, desc=Team procedure\n- id=private, name=Secret, desc=Hidden fact\nunknown continuation\n</available_skills>', 'alice-key', user);
-  assert.match(listing, /Team procedure/);
-  assert.doesNotMatch(listing, /Secret|Hidden fact|unknown continuation/);
-  globalThis.fetch = backend({ removed: true }).fetcher;
-  assert.equal(await amsAuthorizeBridge(headers, ids), false);
-  globalThis.fetch = backend({ inactive: true }).fetcher;
-  assert.equal(await amsAuthorizeBridge(headers, ids), false);
-  assert.equal((await amsGuardRequest(new Request('https://api.example/hermes/ams/v1/chat/completions', {
-    method: 'POST', headers: { authorization: 'Bearer alice-key' },
-  }))).status, 401);
-});
-
-test('protected tools identity verifies service key and actual Knowledge/Core pairing', async t => {
-  let mismatch = false;
-  const calls = [];
-  const server = http.createServer(createGatewayHandler(gatewayConfig({ CORE_API_KEY: 'backend-secret' }), async (url, init) => {
-    calls.push({ url: String(url), headers: init.headers });
-    return Response.json(new URL(url).hostname === 'core' ? { coreId: 'core-one' }
-      : { coreId: mismatch ? 'core-two' : 'core-one', knowledgeId: 'knowledge-one' });
-  }));
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise(resolve => server.close(resolve)));
-  const url = `http://127.0.0.1:${server.address().port}/ams/identity`;
-  assert.equal((await fetch(url)).status, 401); assert.equal(calls.length, 0);
-  const headers = { authorization: 'Bearer backend-secret', 'x-tdai-service-id': 'ams' };
-  const response = await fetch(url, { headers }); assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { coreId: 'core-one', knowledgeId: 'knowledge-one' });
-  mismatch = true; assert.equal((await fetch(url, { headers })).status, 409);
+test('no Core service key still requires a valid user and resource permissions', async t => {
+  const f = await fixture(t, { withoutServiceKey: true });
+  assert.equal((await f.request()).status, 200);
+  for (const call of f.calls) assert.equal(call.headers.authorization, undefined);
+  assert.equal(f.calls.find(call => call.route.endsWith('/auth/verify')).headers['x-tdai-user-key'], 'alice-key');
+  assert.equal((await f.request({}, { headers: { authorization: 'Bearer invalid-key' } })).status, 401);
+  assert.equal((await f.request({ knowledge_id: 'private' })).status, 403);
 });

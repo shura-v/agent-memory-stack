@@ -4,7 +4,7 @@ import type { Interaction } from '../setup/interaction.js';
 
 export function createInteraction(
   prompts: Pick<typeof p, 'isCancel' | 'password' | 'text' | 'select' | 'multiselect' | 'confirm' | 'note'> = p,
-  input: Pick<typeof process.stdin, 'on' | 'off'> = process.stdin,
+  input: Pick<typeof process.stdin, 'on' | 'off'> & { isTTY?: boolean } = process.stdin,
   output: Pick<typeof process.stdout, 'write'> = process.stdout,
 ): Interaction {
   async function answer<T>(prompt: () => Promise<T>): Promise<Exclude<T, symbol>> {
@@ -22,6 +22,7 @@ export function createInteraction(
     }
   }
   return {
+    interactive: input.isTTY === true,
     async text(q) {
       const validate = (value: string | undefined) => q.validate?.(value ?? '');
       return answer(() => (q.secret ? prompts.password({ message: q.message, validate })

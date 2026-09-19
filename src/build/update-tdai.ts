@@ -1,19 +1,17 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { atomicWrite, readEnv } from '../config/files.js';
-import { validateEnv } from '../config/settings.js';
-import { selectionFromEnv } from '../deployment/model.js';
+import { atomicWrite } from '../config/files.js';
+import { readInstallationEnv } from '../config/native-state.js';
+import { extractNativeTemplates } from '../config/native-templates.js';
 import { DeploymentError } from '../runtime/errors.js';
 import { preserveInputs } from '../setup/server-settings.js';
-import { buildContext, loadSourceLock, type SourceLock } from './sources.js';
+import { cacheSourceArchive, loadSourceLock, type SourceLock } from './sources.js';
 
 /** Download the branch tip and pin it for this installation's next apply. */
 export async function updateTdai(directory: string, { fetchImpl = fetch }: { fetchImpl?: typeof fetch } = {}): Promise<{ previousRevision: string; revision: string }> {
-  const env = validateEnv(await readEnv(join(directory, '.env')));
-  if (!selectionFromEnv(env).some(service => ['core', 'knowledge', 'panel', 'memory-proxy'].includes(service))) {
-    throw new DeploymentError('This installation has no TDAI services to update');
-  }
+  await readFile(join(directory, '.env'), 'utf8');
+  await readInstallationEnv(directory);
   const previousRevision = (await loadSourceLock(directory)).sources.tencent.revision;
   let source: SourceLock;
   let bytes: Buffer;
@@ -32,15 +30,9 @@ export async function updateTdai(directory: string, { fetchImpl = fetch }: { fet
   } catch {
     throw new DeploymentError('Could not download TDAI from feat/server_team; the saved source selection was not changed. Check access to GitHub and retry');
   }
-  const cache = join(buildContext(directory), '.cache/upstream');
-  await mkdir(cache, { recursive: true });
-  const archive = join(cache, `tencent-${source.revision}.tar.gz`);
-  const temporary = `${archive}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
-    await rename(temporary, archive);
-  } finally { await rm(temporary, { force: true }); }
+  const archive = await cacheSourceArchive(directory, 'tencent', source, bytes);
+  await extractNativeTemplates(archive, source);
   await preserveInputs(directory);
-  await atomicWrite(join(directory, '.ams/tdai-source.json'), JSON.stringify(source, null, 2) + '\n');
+  await atomicWrite(join(directory, '.ams/pending-tdai-source.json'), JSON.stringify(source, null, 2) + '\n');
   return { previousRevision, revision: source.revision };
 }

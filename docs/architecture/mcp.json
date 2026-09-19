@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Inside the AMS MCP bridge",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1390,
+      860
+    ]
+  },
+  "components": [
+    {
+      "id": "mcp_client",
+      "type": "external",
+      "label": "Agent MCP client",
+      "sublabel": "Memory-user API key",
+      "pos": [
+        30,
+        100
+      ],
+      "size": [
+        220,
+        88
+      ]
+    },
+    {
+      "id": "http_gateway",
+      "type": "security",
+      "label": "AMS HTTP gateway",
+      "sublabel": "Per-request user authentication",
+      "tag": ":8425 /mcp",
+      "pos": [
+        370,
+        100
+      ],
+      "size": [
+        230,
+        88
+      ]
+    },
+    {
+      "id": "sdk_transport",
+      "type": "backend",
+      "label": "Official MCP SDK",
+      "sublabel": "HTTP ↔ stdio transports",
+      "tag": "In-process bridge",
+      "pos": [
+        740,
+        100
+      ],
+      "size": [
+        230,
+        88
+      ]
+    },
+    {
+      "id": "stock_mcp",
+      "type": "backend",
+      "label": "Stock TDAI MCP",
+      "sublabel": "One child per HTTP request",
+      "tag": "Upstream tool contract",
+      "pos": [
+        1110,
+        100
+      ],
+      "size": [
+        230,
+        88
+      ]
+    },
+    {
+      "id": "core_identity",
+      "type": "backend",
+      "label": "Core",
+      "sublabel": "Users, teams, assets and ACL",
+      "pos": [
+        740,
+        420
+      ],
+      "size": [
+        230,
+        88
+      ]
+    },
+    {
+      "id": "access_gate",
+      "type": "security",
+      "label": "AMS access bridge",
+      "sublabel": "User + resource permissions",
+      "tag": "access:8080",
+      "pos": [
+        1110,
+        650
+      ],
+      "size": [
+        230,
+        88
+      ]
+    },
+    {
+      "id": "knowledge_tools",
+      "type": "backend",
+      "label": "TDAI Knowledge",
+      "sublabel": "Wiki and code resource tools",
+      "tag": "knowledge:8421",
+      "pos": [
+        740,
+        650
+      ],
+      "size": [
+        230,
+        88
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "mcp container · request processes stay private",
+      "wraps": [
+        "http_gateway",
+        "sdk_transport",
+        "stock_mcp"
+      ],
+      "pad": 25
+    }
+  ],
+  "connections": [
+    {
+      "id": "public_mcp",
+      "from": "mcp_client",
+      "to": "http_gateway",
+      "label": "Streamable HTTP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sdk_dispatch",
+      "from": "http_gateway",
+      "to": "sdk_transport",
+      "label": "HTTP request",
+      "variant": "emphasis"
+    },
+    {
+      "id": "stdio_bridge",
+      "from": "sdk_transport",
+      "to": "stock_mcp",
+      "label": "MCP over stdio",
+      "variant": "emphasis"
+    },
+    {
+      "id": "adapter_http",
+      "from": "stock_mcp",
+      "to": "access_gate",
+      "label": "HTTP tools + user key",
+      "variant": "emphasis",
+      "labelAt": [
+        1225,
+        202
+      ],
+      "toSide": "right"
+    },
+    {
+      "id": "gateway_verify",
+      "from": "http_gateway",
+      "to": "core_identity",
+      "label": "Verify user",
+      "variant": "security"
+    },
+    {
+      "id": "resource_authorization",
+      "from": "access_gate",
+      "to": "core_identity",
+      "label": "Check permissions",
+      "variant": "security",
+      "fromSide": "top"
+    },
+    {
+      "id": "knowledge_dispatch",
+      "from": "access_gate",
+      "to": "knowledge_tools",
+      "label": "HTTP + service header",
+      "variant": "emphasis",
+      "labelAt": [
+        1040,
+        735
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Upstream tool contract",
+      "items": [
+        "Tool names, schemas and results come from unchanged TDAI stdio.",
+        "AMS connects official SDK transports without a private HTTP server."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Checks before execution",
+      "items": [
+        "Every HTTP POST checks the active user before starting TDAI.",
+        "Access checks resource permissions and adds the service header."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Request lifecycle",
+      "items": [
+        "Each POST starts its own stock stdio process with the caller key.",
+        "Response completion or disconnect closes the child. No persistent sessions."
+      ]
+    }
+  ]
+}

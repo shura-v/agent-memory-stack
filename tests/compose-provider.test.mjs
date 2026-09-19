@@ -1,3 +1,4 @@
+import { installNativeSourceFixture } from './fixtures/native-source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
@@ -7,7 +8,7 @@ import { runtimeFor } from '../dist/runtime/compose.js';
 import { DeploymentError } from '../dist/runtime/errors.js';
 import { applyServer, setupServer } from '../dist/setup/server.js';
 import { encodeEnv, readEnv } from '../dist/config/files.js';
-import { validateEnv } from '../dist/config/settings.js';
+import { resolveSettings } from '../dist/config/settings.js';
 
 const providers = [
   ['docker', 'docker', ['compose', 'version'], /Docker Compose plugin/],
@@ -15,10 +16,10 @@ const providers = [
   ['podman-compose', 'podman-compose', ['version'], /podman-compose.*PATH/],
   ['uvx-podman-compose', 'uvx', ['podman-compose', 'version'], /Install uv/],
 ];
-const manifest = { schemaVersion: 1, images: Object.fromEntries(['runtime', 'cli-proxy-api'].map((name, i) => [name, {
+const manifest = { schemaVersion: 1, images: Object.fromEntries(['runtime', 'core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'mcp'].map((name, i) => [name, {
   id: 'sha256:' + String(i + 1).repeat(64), tag: `${name}:test`, platform: 'linux/arm64', repoDigests: [],
 }])) };
-const settings = validateEnv({ AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'cli-proxy-api', CLIPROXY_API_KEY: 'private-service-key' });
+const settings = resolveSettings({ CLIPROXY_API_KEY: 'private-service-key', CORE_API_KEY: 'private-core-key', LLM_BASE_URL: 'https://provider.invalid/v1', LLM_API_KEY: 'private-provider-key', MEMORY_LLM_MODEL: 'memory', KNOWLEDGE_LLM_MODEL: 'knowledge' });
 
 test('configured providers are checked with their exact command and reused by preflight', async () => {
   for (const [provider, command, args] of providers) {
@@ -62,8 +63,7 @@ test('missing provider stops apply before administrator handoff, image preparati
   const dir = await mkdtemp(join(tmpdir(), 'ams-provider-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await mkdir(join(dir, '.ams'));
-  const env = encodeEnv(validateEnv({ AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'core',
-    CORE_API_KEY: 'private-core-key', LLM_BASE_URL: 'https://provider.invalid/v1', LLM_API_KEY: 'private-provider-key', MEMORY_LLM_MODEL: 'memory' }));
+  const env = encodeEnv(settings);
   await writeFile(join(dir, '.env'), env);
   await writeFile(join(dir, '.ams/runtime.json'), JSON.stringify({ provider: 'podman' }));
   const fail = () => assert.fail('Unavailable provider must stop before prompts or effects');
@@ -87,13 +87,14 @@ test('save-only setup does not require an available Compose provider', async t =
   t.after(() => rm(dir, { recursive: true, force: true }));
   await writeFile(join(dir, '.env'), encodeEnv(settings));
   const ui = {
-    text: async q => q.id === 'directory' ? dir : q.initial,
+    text: async q => q.initial,
     select: async (id, _message, choices, initial) => id === 'provider' ? 'podman' : initial ?? choices[0].value,
     confirm: async (id, _message, initial) => id === 'apply' ? false : initial,
     note() {},
   };
   const fail = () => assert.fail('Save-only setup must not invoke provider or image preparation');
-  await setupServer(ui, { targets: { recall: async () => undefined, remember: async () => {} }, runtime: fail, prepareImages: fail });
-  assert.equal((await readEnv(join(dir, '.env'))).AMS_SERVICES, 'cli-proxy-api');
+  await installNativeSourceFixture(dir);
+  await setupServer(ui, { directory: dir, nativeRoot: join(dir, 'native'), runtime: fail, prepareImages: fail });
+  assert.equal((await readEnv(join(dir, '.env'))).AMS_SERVICES, undefined);
   assert.equal(JSON.parse(await readFile(join(dir, '.ams/runtime.json'), 'utf8')).provider, 'podman');
 });

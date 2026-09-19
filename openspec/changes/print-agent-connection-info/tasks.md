@@ -1,3 +1,5 @@
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## 1. Information-only menu action
 
 - [x] 1.1 Add Show connection details after Configure stack and Apply configuration in the explicit menu and route it to a dedicated presenter, retaining Configure stack as the initial selection and the existing apply command.

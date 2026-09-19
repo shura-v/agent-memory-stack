@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/super/git/agent-memory-stack/docs/architecture/stack.json",
+  "output": "/Users/super/git/agent-memory-stack/docs/architecture/stack.html",
+  "specification": {
+    "sha256": "81c96d0ffaa704ef31e3787c053dc94b6cbb8cc3591bb2b5e0c0a8162b21a8ba",
+    "bytes": 5323
+  },
+  "artifact": {
+    "sha256": "42a5baeca16ec8dd3fe912a3bd0ebe908d7321d678a730234e394ce319a343cc",
+    "bytes": 717294
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

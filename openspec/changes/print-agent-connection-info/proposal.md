@@ -1,3 +1,5 @@
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## Why
 
 Operators need a short explanation of the two independent agent connections: MemoryProxy for model requests with memory and MCP for Knowledge tools. The removed implementation printed JSON profiles and duplicated endpoint routing already shown in Panel.

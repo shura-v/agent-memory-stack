@@ -39,6 +39,7 @@ export async function navigate<T>(ui: Interaction, workflow: (questions: Interac
   }
 
   const questions: Interaction = {
+    interactive: ui.interactive,
     text(q) {
       return ask<string>('text', q.id, JSON.stringify([q.message, q.secret]), async previous => {
         if (q.secret && previous !== undefined) {

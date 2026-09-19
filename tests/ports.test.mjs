@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { reservePublishedPorts } from '../dist/runtime/ports.js';
 import { PortBindingConflict } from '../dist/runtime/errors.js';
 import { ProcessFailure, runProcess } from '../dist/runtime/process.js';
+import { imageServices } from '../dist/build/images.js';
 
-const manifest = { schemaVersion: 1, images: { runtime: { id: 'sha256:' + '1'.repeat(64), tag: 'runtime:test', platform: 'linux/arm64', repoDigests: [] } } };
+const manifest = { schemaVersion: 1, images: Object.fromEntries(imageServices.map((service, index) => [service, { id: 'sha256:' + String(index + 1).repeat(64), tag: `${service}:test`, platform: 'linux/arm64', repoDigests: [] }])) };
 const listener = (service, field, port, target = port) => ({ service, field, port, target, audience: 'user' });
 const proxy = listener('memory-proxy', 'MEMORY_PROXY_PORT', 8096);
 const panel = listener('panel', 'PANEL_PORT', 8123);
