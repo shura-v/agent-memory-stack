@@ -42,7 +42,7 @@ jobs:
           mkdir -p _site/architecture _site/images
           cp docs/index.html _site/index.html
           cp docs/architecture/stack.html docs/architecture/mcp.html _site/architecture/
-          cp docs/images/agent-memory-stack-overview.png _site/images/
+          cp docs/images/agent-memory-stack-overview.png docs/images/agent-memory-stack-setup.gif _site/images/
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v5.0.0
