@@ -1,14 +1,17 @@
+import { installNativeSourceFixture } from './fixtures/native-source.mjs';
+import { readInstallationEnv, orchestrationEnv, readNativeDocuments } from '../dist/config/native-state.js';
+async function readEnv(path) { return readInstallationEnv(dirname(path)); }
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
 import { setupServer as runSetupServer } from '../dist/setup/server.js';
-import { serverQuestions as askServerQuestions, selectServices } from '../dist/setup/questions.js';
+import { serverQuestions as askServerQuestions } from '../dist/setup/questions.js';
 import { resolveDeployment, serviceNames } from '../dist/deployment/model.js';
-import { fields, generateKey, validateEnv } from '../dist/config/settings.js';
-import { readEnv, encodeEnv } from '../dist/config/files.js';
+import { fields, generateKey, resolveSettings } from '../dist/config/settings.js';
+import { encodeEnv } from '../dist/config/files.js';
 import { run } from '../dist/cli/run.js';
 import { Back, Cancelled } from '../dist/setup/interaction.js';
 import { ModelAccessError } from '../dist/setup/model-discovery.js';
@@ -16,18 +19,20 @@ import { navigate } from '../dist/setup/navigation.js';
 
 // Workflow tests never contact a provider unless they inject a discovery fixture.
 const noModels = async () => [];
-const setupServer = (ui, options = {}) => {
+const setupServer = async (ui, options = {}) => {
   assert.ok(options.directory, 'Workflow tests must inject an isolated configuration directory');
+  await installNativeSourceFixture(options.directory);
   return runSetupServer(ui, { listModels: noModels, prepareImages: async () => structuredClone(manifest), ...options,
     ...(options.runtime ? { runtime: (...args) => ({ hasProviderAuthorization: async () => true, ...options.runtime(...args) }) } : {}),
   });
 };
-const serverQuestions = (ui, existing, services, options = {}) => askServerQuestions(ui, existing, services, { listModels: noModels, ...options });
+const serverQuestions = (ui, existing, options = {}) => askServerQuestions(ui, existing, { listModels: noModels, ...options });
 
-const settings = validateEnv({ LLM_BASE_URL: 'https://provider.test.invalid/v1', MEMORY_PROXY_PUBLIC_URL: 'https://models.test.invalid', KNOWLEDGE_PUBLIC_URL: 'https://wiki.other.invalid', PANEL_PUBLIC_URL: 'https://panel.third.invalid', LLM_API_KEY: 'provider-\'"\\${VALUE}', MEMORY_LLM_MODEL: 'memory-test', KNOWLEDGE_LLM_MODEL: 'wiki-test', CORE_API_KEY: generateKey('core'), CLIPROXY_API_KEY: generateKey('cliproxy') });
+const settings = resolveSettings({ LLM_BASE_URL: 'https://provider.test.invalid/v1', MEMORY_PROXY_PUBLIC_URL: 'https://models.test.invalid', KNOWLEDGE_PUBLIC_URL: 'https://wiki.other.invalid', PANEL_PUBLIC_URL: 'https://panel.third.invalid', LLM_API_KEY: 'provider-\'"\\${VALUE}', MEMORY_LLM_MODEL: 'memory-test', KNOWLEDGE_LLM_MODEL: 'wiki-test', CORE_API_KEY: generateKey('core'), CLIPROXY_API_KEY: generateKey('cliproxy') });
 const manifest = { schemaVersion: 1, images: Object.fromEntries(['core','knowledge','panel','memory-proxy','cli-proxy-api','mcp','runtime'].map((service, i) => [service, { id: 'sha256:' + String(i + 1).repeat(64), tag: `${service}:test`, platform: 'linux/arm64', repoDigests: [] }])) };
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'ams-setup-'));
+  process.env.XDG_CONFIG_HOME = join(dir, 'xdg');
   t.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -51,10 +56,21 @@ test('Configure stack starts the service workflow', async () => {
   assert.equal(calls, 1);
   assert.deepEqual(ui.asked, ['action']);
 });
+test('first apply fills deferred native origins from the allocated ports', async t => {
+  const dir = await fixture(t);
+  await setupServer(interaction(), { directory: dir, runtime: () => ({
+    preflight: async () => ({ pending: [] }),
+    reservePorts: async () => ({ ports: { MEMORY_PROXY_PORT: '29096', PANEL_PORT: '29123' }, release: async () => {} }),
+    apply: async () => {}, login: async () => assert.fail('authorization already available'),
+  }) });
+  const documents = await readNativeDocuments(dir);
+  assert.equal(parseYaml(documents['proxy.yaml']).injection.externalGatewayUrl, 'http://127.0.0.1:29096');
+  assert.equal(JSON.parse(documents['panel-instances.json']).instances[0].proxy_endpoint, 'http://127.0.0.1:29096');
+});
 test('questions retain operational fields and preserve advanced settings without network prompts', async () => {
   const ui = interaction();
   const env = await serverQuestions(ui, settings);
-  assert.deepEqual(env, settings);
+  assert.deepEqual(env, { ...settings, MEMORY_PROMPT_MODE: 'code' });
   for (const name of ['LLM_BASE_URL', 'MEMORY_LLM_MODEL', 'KNOWLEDGE_LLM_MODEL', 'MEMORY_PROMPT_MODE', 'LOG_LEVEL']) assert.ok(ui.asked.includes(name), name);
   assert.ok(ui.asked.includes('keep:LLM_API_KEY'));
   assert.ok(!ui.asked.some(id => /CORE_API_KEY|CLIPROXY_API_KEY/.test(id)));
@@ -96,7 +112,7 @@ test('CLIProxyAPI account provider defaults to Codex, offers Claude and preserve
     assert.deepEqual(question.options.map(option => option.label), ['ChatGPT (Codex)', 'Claude']);
   }
   assert.equal(settings.CLIPROXY_AUTH_PROVIDER, 'codex');
-  assert.throws(() => validateEnv({ ...settings, CLIPROXY_AUTH_PROVIDER: 'invalid' }), /CLIPROXY_AUTH_PROVIDER/);
+  assert.equal(resolveSettings({ ...settings, CLIPROXY_AUTH_PROVIDER: 'custom' }).CLIPROXY_AUTH_PROVIDER, 'custom');
 });
 test('local service keys are generated or reused without questions and invalid saved keys are not replaced', async () => {
   const fresh = interaction();
@@ -110,12 +126,12 @@ test('local service keys are generated or reused without questions and invalid s
   assert.equal(repeated.CORE_API_KEY, generated.CORE_API_KEY);
   assert.equal(repeated.CLIPROXY_API_KEY, generated.CLIPROXY_API_KEY);
   for (const name of ['CORE_API_KEY', 'CLIPROXY_API_KEY']) {
-    await assert.rejects(serverQuestions(interaction(), { ...generated, [name]: 'invalid\nkey' }), new RegExp(name));
+    assert.equal((await serverQuestions(interaction(), { ...generated, [name]: 'arbitrary\nkey' }))[name], 'arbitrary\nkey');
   }
 });
-test('output tokens and LLM timeouts use env defaults or saved values without wizard questions', async () => {
+test('output tokens and LLM timeouts inherit native defaults or retain saved values without wizard questions', async () => {
   for (const [existing, expectedCore, expectedKnowledge, expectedCoreTimeout, expectedKnowledgeTimeout] of [
-    [{}, '32000', '32768', '300000', '1200000'],
+    [{}, undefined, undefined, undefined, undefined],
     [{ ...settings, MEMORY_LLM_MAX_TOKENS: '8192', KNOWLEDGE_LLM_MAX_TOKENS: '16384', MEMORY_LLM_TIMEOUT_MS: '120000', KNOWLEDGE_LLM_TIMEOUT_MS: '600000' }, '8192', '16384', '120000', '600000'],
   ]) {
     const ui = interaction();
@@ -131,7 +147,7 @@ test('output tokens and LLM timeouts use env defaults or saved values without wi
   }
   for (const name of ['MEMORY_LLM_MAX_TOKENS', 'KNOWLEDGE_LLM_MAX_TOKENS', 'MEMORY_LLM_TIMEOUT_MS', 'KNOWLEDGE_LLM_TIMEOUT_MS']) {
     const ui = interaction();
-    await assert.rejects(serverQuestions(ui, { ...settings, [name]: 'invalid' }), new RegExp(name));
+    assert.equal((await serverQuestions(ui, { ...settings, [name]: 'custom-value' }))[name], 'custom-value');
     assert.ok(!ui.asked.includes(name));
   }
 });
@@ -173,7 +189,7 @@ test('fresh setup prepares the full implemented stack images after approval and 
       events.push('prepare');
       assert.equal(options.projectDir, destination);
       assert.equal(options.runtime, 'podman');
-      assert.deepEqual([...options.services].sort(), [...serviceNames, 'runtime'].sort());
+      assert.ok(!Object.hasOwn(options, 'services'));
       await assert.rejects(readFile(join(destination, '.ams/images.json')), { code: 'ENOENT' });
       return selected;
     },
@@ -204,7 +220,8 @@ test('image preparation failure preserves installed configuration and skips pref
       apply: async () => assert.fail('images unavailable'),
     }),
   }), /synthetic build failure/);
-  assert.equal(await readFile(join(dir, '.env'), 'utf8'), before);
+  assert.equal(await readFile(join(dir, '.env'), 'utf8'), encodeEnv(orchestrationEnv(settings)));
+  assert.equal((await readEnv(join(dir, '.env'))).CORE_API_KEY, settings.CORE_API_KEY);
   assert.equal(await readFile(join(dir, '.ams/images.json'), 'utf8'), images);
 });
 test('saved stack with an active administrator applies without generating or asking for a key',async t=>{
@@ -215,39 +232,9 @@ test('saved stack with an active administrator applies without generating or ask
   assert.ok(!ui.asked.includes('server-action'));
   assert.equal((await readEnv(join(dir,'.env'))).CORE_API_KEY,settings.CORE_API_KEY);
 });
-test('service selection derives full defaults or saved topology without a question', async () => {
-  const fresh = interaction();
-  assert.deepEqual(await selectServices(fresh, {}), serviceNames);
-  assert.deepEqual(fresh.asked, []);
-  assert.match(fresh.notes.join('\n'), /Core \(memory storage/);
-  const saved = interaction();
-  assert.deepEqual(await selectServices(saved, { AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'panel,cli-proxy-api' }), ['panel','cli-proxy-api']);
-  assert.deepEqual(saved.asked, []);
-  await assert.rejects(selectServices(interaction(), { AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: '' }), /AMS_SERVICES.*\.env/);
-});
-
-test('standalone CLIProxyAPI asks only its settings and deploys its required subset', async t => {
-  const dir = await fixture(t); const destination = join(dir, 'cli-only');
-  await mkdir(destination);
-  await writeFile(join(destination, '.env'), encodeEnv(validateEnv({ AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'cli-proxy-api', CLIPROXY_API_KEY: 'saved-cli-key', CLIPROXY_SERVICE_ENABLED: 'true' })));
-  const ui = interaction();
-  let applied;
-  await setupServer(ui, { directory: destination, runtime: () => ({
-    preflight: async (_manifest, env) => assert.equal(env.AMS_SERVICES, 'cli-proxy-api'),
-    apply: async (key, opts) => { applied = opts; assert.equal(key, undefined); }, login: async () => assert.fail('not requested'), status: async () => '',
-  }) });
-  assert.deepEqual(applied, { allowPending: false, createAdminKey: undefined });
-  assert.ok(!ui.asked.includes('server-action'));
-  assert.equal(ui.handoffs.length, 0);
-  for (const name of ['CORE_API_KEY','LLM_API_KEY','LLM_BASE_URL','MEMORY_LLM_MODEL','KNOWLEDGE_LLM_MODEL','PANEL_PUBLIC_URL','KNOWLEDGE_PUBLIC_URL','generate:admin']) assert.ok(!ui.asked.includes(name), name);
-  const compose = parseYaml(await readFile(join(destination, 'compose.yaml'), 'utf8'));
-  assert.deepEqual(Object.keys(compose.services).sort(), ['cli-proxy-api', 'config']);
-  assert.match(ui.notes.join('\n'), /127\.0\.0\.1:8317 \(authenticated service consumers/);
-});
-
 test('saved local CLIProxyAPI can log in after installation without an action menu', async t => {
   const dir = await fixture(t);
-  const env = await serverQuestions(interaction(), {}, ['cli-proxy-api']);
+  const env = await serverQuestions(interaction(), {});
   await writeFile(join(dir, '.env'), encodeEnv(env));
   const ui = interaction();
   const events = [];
@@ -266,32 +253,10 @@ test('saved local CLIProxyAPI can log in after installation without an action me
   assert.equal(ui.handoffs.length, 0);
 });
 
-test('Knowledge reads remote service credentials from .env and reports incomplete dependencies', async () => {
-  const existing = { AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'knowledge', REMOTE_CORE_URL: 'https://backend.invalid/core', REMOTE_CORE_API_KEY: 'existing-core-key', REMOTE_PANEL_URL: 'https://callback.invalid/panel' };
-  const ui = interaction();
-  const env = await serverQuestions(ui, existing);
-  assert.equal(env.REMOTE_CORE_API_KEY, 'existing-core-key');
-  assert.equal(env.PANEL_MODE, 'remote');
-  assert.ok(!ui.asked.some(id => id.startsWith('REMOTE_')));
-  await assert.rejects(serverQuestions(interaction(), { ...existing, REMOTE_PANEL_URL: '' }), /\.env:.*REMOTE_PANEL_URL/);
-});
-
-test('MemoryProxy preserves saved remote dependencies and inactive local keys', async () => {
-  const existing = { ...settings, AMS_SERVICES: 'memory-proxy', CORE_MODE: 'remote', MODEL_MODE: 'remote', KNOWLEDGE_MODE: 'disabled', PANEL_MODE: 'disabled', REMOTE_CORE_URL: 'https://core.invalid', REMOTE_CORE_API_KEY: 'remote-core-key', REMOTE_MODEL_BASE_URL: 'https://model.invalid/v1', REMOTE_MODEL_API_KEY: 'remote-model-key' };
-  const ui = interaction();
-  const env = await serverQuestions(ui, existing);
-  assert.equal(env.CORE_API_KEY, settings.CORE_API_KEY);
-  assert.equal(env.CLIPROXY_API_KEY, settings.CLIPROXY_API_KEY);
-  assert.equal(env.REMOTE_CORE_API_KEY, 'remote-core-key');
-  assert.equal(env.REMOTE_MODEL_API_KEY, 'remote-model-key');
-  assert.equal(env.KNOWLEDGE_MODE, 'disabled');
-  assert.ok(!ui.asked.some(id => /^REMOTE_|_PUBLIC_URL$|generate:/.test(id)));
-});
-
-test('public origins follow saved ports when absent and preserve explicit external origins without questions', async () => {
+test('native origins wait for first apply and retain explicit values without questions', async () => {
   const fresh = interaction({ useDefaults: true });
   const env = await serverQuestions(fresh, { MEMORY_PROXY_PORT: '28096' });
-  assert.equal(env.MEMORY_PROXY_PUBLIC_URL, 'http://127.0.0.1:28096');
+  assert.equal(env.MEMORY_PROXY_PUBLIC_URL, undefined);
   assert.ok(!fresh.asked.includes('MEMORY_PROXY_PORT'));
   assert.ok(!fresh.asked.includes('MEMORY_PROXY_PUBLIC_URL'));
   const saved = interaction({ useDefaults: true });
@@ -307,7 +272,7 @@ test('provider endpoint questions show the example only as a placeholder and pre
   const question = fresh.questions.find(item => item.id === 'LLM_BASE_URL');
   assert.equal(question.initial, undefined);
   assert.equal(question.placeholder, 'https://api.example.com/v1');
-  assert.ok(question.validate(''));
+  assert.equal(question.validate, undefined);
   const saved = interaction();
   await serverQuestions(saved, settings);
   assert.equal(saved.questions.find(item => item.id === 'LLM_BASE_URL').initial, settings.LLM_BASE_URL);
@@ -316,7 +281,7 @@ test('provider endpoint questions show the example only as a placeholder and pre
 test('Core and Knowledge select from one discovery after the provider URL and key are entered', async () => {
   const ui = interaction({ MEMORY_LLM_MODEL: 'model:1', KNOWLEDGE_LLM_MODEL: 'model:0' });
   const calls = [];
-  const env = await serverQuestions(ui, {}, serviceNames, { listModels: async (...args) => { calls.push(args); return ['first-model', 'second-model']; } });
+  const env = await serverQuestions(ui, {}, { listModels: async (...args) => { calls.push(args); return ['first-model', 'second-model']; } });
   assert.deepEqual(calls, [[settings.LLM_BASE_URL, settings.LLM_API_KEY]]);
   assert.equal(env.MEMORY_LLM_MODEL, 'second-model');
   assert.equal(env.KNOWLEDGE_LLM_MODEL, 'first-model');
@@ -328,7 +293,7 @@ test('Core and Knowledge select from one discovery after the provider URL and ke
 test('unavailable or empty model discovery falls back once to the original model inputs', async () => {
   for (const fail of [false, true]) {
     const ui = interaction(); let calls = 0;
-    const env = await serverQuestions(ui, {}, serviceNames, { listModels: async () => { calls++; if (fail) throw new Error(settings.LLM_API_KEY); return []; } });
+    const env = await serverQuestions(ui, {}, { listModels: async () => { calls++; if (fail) throw new Error(settings.LLM_API_KEY); return []; } });
     assert.equal(calls, 1);
     assert.equal(env.MEMORY_LLM_MODEL, settings.MEMORY_LLM_MODEL);
     assert.equal(env.KNOWLEDGE_LLM_MODEL, settings.KNOWLEDGE_LLM_MODEL);
@@ -341,7 +306,7 @@ test('API access rejection retries the key without keeping the rejected value or
   for (const saved of [false, true]) {
     const calls = [];
     const ui = interaction({ 'LLM_API_KEY:retry:0': settings.LLM_API_KEY, 'LLM_API_KEY:retry:1': 'corrected-key', MEMORY_LLM_MODEL: 'model:0', KNOWLEDGE_LLM_MODEL: 'model:0' });
-    const env = await navigate(ui, questions => serverQuestions(questions, saved ? settings : {}, serviceNames, {
+    const env = await navigate(ui, questions => serverQuestions(questions, saved ? settings : {}, {
       listModels: async (url, key) => {
         calls.push([url, key]);
         if (key !== 'corrected-key') throw new ModelAccessError(calls.length === 1 ? 401 : 403);
@@ -354,7 +319,7 @@ test('API access rejection retries the key without keeping the rejected value or
     assert.equal(env.KNOWLEDGE_LLM_MODEL, 'available-model');
     for (const q of ui.questions.filter(q => q.id.startsWith('LLM_API_KEY:retry:'))) {
       assert.equal(q.secret, true); assert.equal(q.initial, undefined);
-      assert.doesNotMatch(q.message, /keep/); assert.ok(q.validate(''));
+      assert.doesNotMatch(q.message, /keep/); assert.equal(q.validate, undefined);
     }
     assert.equal(ui.asked.filter(id => id === 'LLM_BASE_URL').length, 1);
     assert.doesNotMatch(ui.notes.join('\n'), /Enter the model names manually/);
@@ -365,7 +330,7 @@ test('API access rejection retries the key without keeping the rejected value or
 test('cancelling API key retry exits setup instead of falling back to manual models', async () => {
   const ui = interaction(); const text = ui.text;
   ui.text = async q => { if (q.id.startsWith('LLM_API_KEY:retry:')) throw new Cancelled(); return text(q); };
-  await assert.rejects(serverQuestions(ui, {}, ['core'], { listModels: async () => { throw new ModelAccessError(401); } }), Cancelled);
+  await assert.rejects(serverQuestions(ui, {}, { listModels: async () => { throw new ModelAccessError(401); } }), Cancelled);
   assert.ok(!ui.asked.includes('MEMORY_LLM_MODEL'));
 });
 
@@ -384,7 +349,7 @@ test('Escape after a corrected key preserves that correction and cached models',
     if (args[0] === 'MEMORY_LLM_MODEL' && modelVisits++ === 0) throw new Back();
     return select(...args);
   };
-  const env = await navigate(ui, questions => serverQuestions(questions, {}, ['core'], { listModels: async (_url, key) => {
+  const env = await navigate(ui, questions => serverQuestions(questions, {}, { listModels: async (_url, key) => {
     discoveries++;
     if (key !== 'corrected-key') throw new ModelAccessError(401);
     return ['available-model'];
@@ -396,53 +361,20 @@ test('Escape after a corrected key preserves that correction and cached models',
 
 test('saved models outside the list remain selected and manual entry stays available', async () => {
   const saved = interaction();
-  const kept = await serverQuestions(saved, { ...settings, AMS_SERVICES: 'core', MODEL_MODE: 'disabled', KNOWLEDGE_MODE: 'disabled', PANEL_MODE: 'disabled', PROXY_MODE: 'disabled' }, ['core'], { listModels: async () => ['listed-model'] });
+  const kept = await serverQuestions(saved, settings, { listModels: async () => ['listed-model'] });
   assert.equal(kept.MEMORY_LLM_MODEL, settings.MEMORY_LLM_MODEL);
   assert.equal(saved.questions.find(item => item.id === 'MEMORY_LLM_MODEL').initial, 'saved');
   const manual = interaction({ MEMORY_LLM_MODEL: 'custom-model' });
   const select = manual.select;
   manual.select = async (...args) => args[0] === 'MEMORY_LLM_MODEL' ? 'manual' : select(...args);
-  const entered = await serverQuestions(manual, {}, ['core'], { listModels: async () => ['listed-model'] });
+  const entered = await serverQuestions(manual, {}, { listModels: async () => ['listed-model'] });
   assert.equal(entered.MEMORY_LLM_MODEL, 'custom-model');
 });
 
-test('unused providers are not queried and cancelling a model select stops setup', async () => {
-  await serverQuestions(interaction(), {}, ['cli-proxy-api'], { listModels: async () => assert.fail('unused provider query') });
+test('cancelling a model select stops setup', async () => {
   const ui = interaction(); const select = ui.select;
   ui.select = async (...args) => { if (args[0] === 'MEMORY_LLM_MODEL') throw new Cancelled(); return select(...args); };
-  await assert.rejects(serverQuestions(ui, {}, ['core'], { listModels: async () => ['listed-model'] }), Cancelled);
-});
-
-test('reviewed removals and declined staged start retain desired settings and preserve applied inventory', async t => {
-  const dir = await fixture(t); await mkdir(join(dir, '.ams')); const before = encodeEnv(validateEnv({ AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'cli-proxy-api', CLIPROXY_API_KEY: settings.CLIPROXY_API_KEY }));
-  await writeFile(join(dir, '.env'), before);
-  const inventory = JSON.stringify({ version: 1, services: resolveDeployment(settings).containers });
-  await writeFile(join(dir, '.ams/applied.json'), inventory);
-  for (const cancellation of [{ apply: false }, { 'staged-start': false }]) {
-    const ui = interaction({ ...cancellation });
-    let applied = false;
-    const result = setupServer(ui, { directory: dir, runtime: () => ({ preflight: async () => ({ pending: ['Remote peer unavailable'] }),
-      apply: async () => { applied = true; }, login: async () => assert.fail('not requested'), status: async () => '',
-    }) });
-    if (cancellation.apply === false) await result;
-    else await assert.rejects(result, Cancelled);
-    assert.equal(applied, false);
-    assert.equal((await readEnv(join(dir,'.env'))).AMS_SERVICES, 'cli-proxy-api');
-    assert.equal(await readFile(join(dir,'.ams/applied.json'),'utf8'), inventory);
-    assert.match(ui.notes.join('\n'), /Removed containers: .*core/);
-    assert.ok(!ui.notes.join('\n').includes(settings.CORE_API_KEY));
-  }
-});
-
-test('remote CLIProxyAPI setup has no action menu or local login prompt', async t => {
-  const dir = await fixture(t);
-  const env = await serverQuestions(interaction(), { REMOTE_CORE_URL:'https://core.invalid', REMOTE_CORE_API_KEY:'core-remote', REMOTE_MODEL_BASE_URL:'https://model.invalid/v1', REMOTE_MODEL_API_KEY:'model-remote' }, ['memory-proxy']);
-  await writeFile(join(dir,'.env'), encodeEnv(env));
-  const ui = interaction();
-  await setupServer(ui, { directory: dir, runtime: () => ({ preflight:async()=>{}, apply:async key=>assert.equal(key,undefined), login:async()=>assert.fail('remote login forbidden'), status:async()=>'' }) });
-  assert.ok(!ui.asked.includes('server-action'));
-  assert.ok(!ui.asked.includes('generate:admin'));
-  assert.ok(!ui.asked.includes('login'));
+  await assert.rejects(serverQuestions(ui, {}, { listModels: async () => ['listed-model'] }), Cancelled);
 });
 
 test('configuration snapshot preserves previous applied inputs after desired settings were saved', async t => {
@@ -485,7 +417,7 @@ test('Escape returns from provider to the action menu without introducing direct
   assert.equal(providerVisits, 2);
   assert.ok(!ui.asked.includes('directory'));
   assert.equal(ui.asked.filter(id => id === 'action').length, 2);
-  assert.equal((await readEnv(join(dir,'server','.env'))).AMS_SERVICES, serviceNames.join(','));
+  assert.deepEqual(resolveDeployment(await readEnv(join(dir,'server','.env'))).services, serviceNames);
 });
 
 test('post-apply login cancellation cannot repeat configuration saves, image preparation or installation', async t => {

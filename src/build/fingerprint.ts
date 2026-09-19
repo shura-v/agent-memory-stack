@@ -13,18 +13,14 @@ export async function buildFingerprint(service: ImageService, root = packageRoot
   if (service === 'runtime') {
     inputs = ['deploy/runtime.Dockerfile', 'dist/runtime', 'dist/config', 'dist/deployment'];
   } else if (service === 'mcp') {
-    inputs = ['deploy/mcp.Dockerfile', 'deploy/debian.sources', 'deploy/locks/mcp',
+    inputs = ['deploy/node.Dockerfile', 'deploy/debian.sources', 'deploy/locks/mcp',
+      'upstream.lock.json', 'dist/build/sources.js',
       'dist/runtime', 'dist/config', 'dist/deployment'];
   } else if (service === 'cli-proxy-api') {
     inputs = ['deploy/cli-proxy-api.Dockerfile', 'deploy/debian.sources', 'upstream.lock.json'];
   } else {
-    const lock = service === 'memory-proxy' ? 'proxy' : service;
-    inputs = ['deploy/node.Dockerfile', 'deploy/debian.sources', `deploy/locks/${lock}`,
-      'upstream.lock.json', 'dist/build/sources.js', 'dist/patches/apply.js',
-      'patches/ams-access.ts', 'patches/ams-features.tsx',
-      'dist/runtime/environment.js', 'dist/runtime/service-identity.js', 'dist/runtime/service-identity.d.ts'];
-    if (service === 'panel') inputs.push('deploy/locks/panel-web');
-    if (service === 'knowledge' || service === 'memory-proxy') inputs.push('dist/build/native-smoke.js');
+    inputs = ['deploy/node.Dockerfile', 'deploy/debian.sources',
+      'upstream.lock.json', 'dist/build/sources.js'];
   }
   const hash = createHash('sha256').update(`ams-build-inputs-v1\0${service}\0`);
   const add = (name: string, bytes: Uint8Array) => hash.update(JSON.stringify([name, bytes.length])).update(bytes);
@@ -39,7 +35,7 @@ export async function buildFingerprint(service: ImageService, root = packageRoot
     else throw new Error(`Build inputs must use regular files: ${relative}`);
   }
   for (const input of inputs.sort()) await visit(input);
-  if (!['runtime', 'mcp', 'cli-proxy-api'].includes(service)) {
+  if (!['runtime', 'cli-proxy-api'].includes(service)) {
     const { revision, url, sha256 } = (await loadSourceLock(projectDir, root)).sources.tencent;
     add('effective-tencent-source', Buffer.from(JSON.stringify({ revision, url, sha256 })));
   }

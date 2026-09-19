@@ -17,7 +17,7 @@ const operationLabel = 'io.agent-memory-stack.port-reservation';
 /** Reserve on the actual engine, including Docker contexts and Podman machines. */
 export async function reservePublishedPorts(engine: string, project: string, manifest: ImageManifest,
   interfaces: ServiceInterface[], run: Runner): Promise<PortReservation> {
-  validateDeploymentImages(manifest, ['runtime']);
+  validateDeploymentImages(manifest);
   if (!interfaces.length) return { ports: {}, async release() {} };
   const operation = randomUUID();
   const helpers = new Set<string>();

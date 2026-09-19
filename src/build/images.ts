@@ -37,16 +37,9 @@ export function validateImageManifest(value: unknown, requireComplete = true, pl
   return manifest;
 }
 
-/** Deployment checks inspect only the required images; archive validation stays independent. */
-export function validateDeploymentImages(value: unknown, required: readonly ImageService[], platform?: ImagePlatform): ImageManifest {
-  const manifest = validateImageManifest(value, false);
-  if (!required.length || required.some(service => !imageServices.includes(service))) throw new DeploymentError('Invalid required image selection');
-  for (const service of required) {
-    const identity = manifest.images[service];
-    if (!identity) throw new DeploymentError(`Missing image: ${service}`);
-    if (platform && identity.platform !== platform) throw new DeploymentError(`Incompatible image platform: ${service} is ${identity.platform}, expected ${platform}`);
-  }
-  return manifest;
+/** Every deployment and delivered bundle contains the full stack. */
+export function validateDeploymentImages(value: unknown, platform?: ImagePlatform): ImageManifest {
+  return validateImageManifest(value, true, platform);
 }
 
 export async function writeImageManifest(projectDir: string, manifest: ImageManifest): Promise<void> {
@@ -68,7 +61,7 @@ export async function prepareBuildContext(projectDir: string): Promise<string> {
     });
   }
   await writeFile(resolve(context, 'package.json'), contextPackageJson);
-  await writeFile(resolve(context, '.dockerignore'), '**\n!deploy/\n!deploy/**\n!dist/\n!dist/runtime/\n!dist/runtime/**\n!dist/config/\n!dist/config/**\n!dist/build/\n!dist/build/**\n!dist/deployment/\n!dist/deployment/**\n!package.json\n!.cache/\n!.cache/upstream/\n!.cache/upstream/tencent/\n!.cache/upstream/tencent/**\n!.cache/upstream/cliproxy/\n!.cache/upstream/cliproxy/**\n**/node_modules\n**/.git\n**/.env\n**/.env.*\n**/.admin-key*\n**/config.local.*\n');
+  await writeFile(resolve(context, '.dockerignore'), '**\n!deploy/\n!deploy/**\n!dist/\n!dist/runtime/\n!dist/runtime/**\n!dist/config/\n!dist/config/**\n!dist/build/\n!dist/build/**\n!dist/deployment/\n!dist/deployment/**\n!package.json\n!.cache/\n!.cache/upstream/\n!.cache/upstream/tencent/\n!.cache/upstream/tencent/**\n!.cache/upstream/cliproxy/\n!.cache/upstream/cliproxy/**\n');
   return context;
 }
 
@@ -92,7 +85,7 @@ export async function buildImages(options: BuildOptions): Promise<ImageManifest>
   await fetchSources(projectDir);
   const sourceLock = await loadSourceLock(projectDir);
   for (const service of selected) {
-    const nodeService = !['cli-proxy-api', 'runtime', 'mcp'].includes(service);
+    const nodeService = !['cli-proxy-api', 'runtime'].includes(service);
     const tag = `agent-memory-stack/${service}:local`;
     const fingerprint = await buildFingerprint(service, undefined, projectDir);
     const args = ['build', '--file', `deploy/${nodeService ? 'node' : service}.Dockerfile`, '--tag', tag,

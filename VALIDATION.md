@@ -2,13 +2,19 @@
 
 Updated: 2026-09-19. Tests use synthetic credentials and isolated data. The user's existing stack is outside the test projects.
 
-## Acceptance scope
+## Current stock integration — 2026-09-19
+
+Current evidence is tracked in [simplify-stock-tdai-integration/validation.md](openspec/changes/simplify-stock-tdai-integration/validation.md). The stock source, flat archive-based configuration and native MCP transition requires fresh builds and acceptance. Earlier results, including those in `preserve-native-tdai-configs`, tested a patched implementation and do not establish current acceptance.
+
+Everything below is **historical development evidence**. Commands referring to removed patches, placement tests or model smoke fixtures are not current instructions. Use the current change validation record for runnable commands and limits.
+
+## Historical acceptance scope
 
 The sole acceptance criterion for the two archived delivery changes is **required images built and selected containers started**. Long-running containers must remain running at the recorded observation point; required one-shot initialization jobs must complete successfully. The local image/startup evidence below records that scope. It does not assert that every later user installation is currently running.
 
 Comprehensive agent, MCP, provider, memory/Wiki, authorization, and full recovery validation is deferred until Supergateway and the remaining integrations are implemented. These checks are outside the archived changes' completion criteria. Existing test results below remain historical evidence; unchecked functional acceptance has not been converted into a pass.
 
-## Current CLI verification
+## Earlier CLI verification
 
 ### MCP lifecycle methods and selected-image exports — 2026-09-19
 

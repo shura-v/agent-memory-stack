@@ -1,3 +1,4 @@
+import { installNativeSourceFixture } from './fixtures/native-source.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
@@ -5,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeEnv } from '../dist/config/files.js';
 import { showConnectionDetails } from '../dist/setup/connection-info.js';
+import { prepareNativeConfiguration, saveNativeConfiguration } from '../dist/config/native-state.js';
+import { updateNativeDocument } from '../dist/config/native-documents.js';
 
 const settings = { LLM_BASE_URL: 'https://provider.invalid/v1', LLM_API_KEY: 'provider-secret',
   MEMORY_LLM_MODEL: 'memory', KNOWLEDGE_LLM_MODEL: 'knowledge', CORE_API_KEY: 'core-secret', CLIPROXY_API_KEY: 'cpa-secret',
@@ -26,8 +29,7 @@ const block = (fixture, name) => {
 };
 
 test('each service block pairs its addresses with the matching credentials', async t => {
-  const f = await fixture(t, { ...settings, REMOTE_CORE_API_KEY: 'remote-core-secret', REMOTE_MODEL_API_KEY: 'remote-model-secret',
-    REMOTE_CORE_URL: 'https://remote-core.invalid', REMOTE_MODEL_BASE_URL: 'https://remote-model.invalid/v1' });
+  const f = await fixture(t);
   const before = await readFile(join(f.directory, '.env'), 'utf8');
   await showConnectionDetails(f.ui, f.directory, {
     listKeys: async (directory, provider) => { assert.equal(directory, f.directory); assert.equal(provider, 'podman'); return [key]; },
@@ -50,10 +52,6 @@ test('each service block pairs its addresses with the matching credentials', asy
   }
   assert.match(block(f, 'Internal LLM'), /API base URL: https:\/\/provider.invalid\/v1/);
   assert.match(block(f, 'Internal LLM'), /\nprovider-secret\n/);
-  assert.match(block(f, 'Remote Core'), /inactive\nAPI base URL: https:\/\/remote-core.invalid/);
-  assert.match(block(f, 'Remote Core'), /\nremote-core-secret\n/);
-  assert.match(block(f, 'Remote model provider'), /API base URL: https:\/\/remote-model.invalid\/v1/);
-  assert.match(block(f, 'Remote model provider'), /\nremote-model-secret\n/);
   assert.equal(await readFile(join(f.directory, '.env'), 'utf8'), before);
 });
 
@@ -85,15 +83,6 @@ test('a revoked key does not hide other credentials and its failure stays in the
     assert.match(block(f, name), /\nsynthetic-three\n/);
   }
   assert.doesNotMatch(f.output.join('\n'), /secret-bearing failure/);
-});
-
-test('absent listeners have no invented local port and retained credentials stay labeled', async t => {
-  const f = await fixture(t, { AMS_DEPLOYMENT_VERSION: '1', AMS_SERVICES: 'cli-proxy-api', CLIPROXY_API_KEY: 'cpa-secret' });
-  await showConnectionDetails(f.ui, f.directory, { listKeys: async () => assert.fail('No local Core') });
-  assert.match(block(f, 'MCP'), /Not configured on this machine/);
-  assert.match(block(f, 'MemoryProxy'), /Not configured on this machine/);
-  assert.doesNotMatch(f.output.join('\n'), /Port: \d|localhost:\d/);
-  assert.match(block(f, 'CLIProxyAPI'), /\ncpa-secret\n/);
 });
 
 test('lookup failures preserve endpoint/env key blocks without echoing raw errors', async t => {
@@ -133,10 +122,78 @@ test('shared internal routing displays its effective key and labels retained ext
   assert.match(internal, /Source: this stack's CLIProxyAPI/);
   assert.match(internal, /API base URL: http:\/\/cli-proxy-api:8317\/v1/);
   assert.match(internal, /API key \(CLIPROXY_API_KEY\):\ncpa-secret/);
-  assert.match(internal, /Core model: select during Apply after CLIProxyAPI authorization/);
+  assert.match(internal, /Core model: \n/);
+  assert.doesNotMatch(internal, /select during Apply/);
   assert.doesNotMatch(internal, /provider-secret/);
   const external = block(f, 'External internal-model API');
   assert.match(external, /saved credentials, inactive/);
   assert.match(external, /API base URL: https:\/\/provider.invalid\/v1/);
   assert.match(external, /\nprovider-secret\n/);
+});
+
+test('connection details read each native model configuration and label the dedicated proxy admin key', async t => {
+  const f = await fixture(t);
+  const root = join(f.directory, 'native');
+  await installNativeSourceFixture(f.directory);
+  const candidate = await prepareNativeConfiguration(f.directory, settings, { root });
+  await saveNativeConfiguration(f.directory, candidate);
+  for (const [file, format, changes] of [
+    ['core.yaml', 'yaml', [
+      { path: ['llm', 'baseUrl'], value: 'https://core-model.synthetic.invalid/v1' },
+      { path: ['llm', 'model'], value: 'native-core-model' }, { path: ['llm', 'apiKey'], value: 'native-core-provider-key' },
+    ]],
+    ['knowledge.env', 'env', [
+      { path: ['LLM_BASE_URL'], value: 'https://knowledge-model.synthetic.invalid/v1' },
+      { path: ['LLM_MODEL'], value: 'native-knowledge-model' }, { path: ['LLM_API_KEY'], value: 'native-knowledge-provider-key' },
+    ]],
+    ['proxy.yaml', 'yaml', [{ path: ['admin', 'apiKey'], value: 'synthetic-dedicated-proxy-admin-key' }]],
+  ]) await writeFile(join(root, 'overrides', file), updateNativeDocument(await readFile(join(root, 'overrides', file), 'utf8'), format, changes));
+  const beforeEnv = await readFile(join(f.directory, '.env'), 'utf8');
+  await showConnectionDetails(f.ui, f.directory, { listKeys: async () => [key], readKey: async () => 'synthetic-agent-user-key' });
+  for (const service of ['Core', 'Knowledge']) {
+    const output = f.output.find(text => text.startsWith(`${service} — native internal LLM`));
+    assert.ok(output, `${service} has a distinct native internal model block`);
+    const name = service.toLowerCase();
+    assert.ok(output.includes(`API base URL: https://${name}-model.synthetic.invalid/v1`));
+    assert.ok(output.includes(`Model: native-${name}-model`));
+    assert.ok(output.includes(`\nnative-${name}-provider-key\n`));
+  }
+  const admin = f.output.find(text => text.startsWith('MemoryProxy — native administration'));
+  assert.match(admin, /Administrative key \([^\n]*overrides\/proxy.yaml admin.apiKey\):\nsynthetic-dedicated-proxy-admin-key\n/);
+  assert.doesNotMatch(block(f, 'Panel'), /synthetic-dedicated-proxy-admin-key/);
+  assert.doesNotMatch(block(f, 'MemoryProxy'), /synthetic-dedicated-proxy-admin-key/);
+  assert.match(block(f, 'MemoryProxy'), /synthetic-agent-user-key/);
+  assert.doesNotMatch(f.output.join('\n'), /\nprovider-secret\n/);
+  assert.equal(await readFile(join(f.directory, '.env'), 'utf8'), beforeEnv);
+
+  const knowledge = f.output.find(text => text.startsWith('Knowledge connections'));
+  assert.match(knowledge, /Panel callback URL: http:\/\/panel:8123/);
+  assert.doesNotMatch(knowledge, /AMS_CORE_|Service key/);
+  for (const name of ['Panel connections', 'MemoryProxy connections']) {
+    const connection = f.output.find(text => text.startsWith(name));
+    assert.match(connection, /Core API: http:\/\/core:8420/);
+    assert.match(connection, /core-secret/);
+    assert.match(connection, /overrides/);
+  }
+});
+
+test('connection details identify inherited defaults separately from overrides and never mutate either set', async t => {
+  const f = await fixture(t, settings);
+  const root = join(f.directory, 'native');
+  await installNativeSourceFixture(f.directory);
+  const candidate = await prepareNativeConfiguration(f.directory, settings, { root });
+  await saveNativeConfiguration(f.directory, candidate);
+  const coreOverride = join(root, 'overrides/core.yaml');
+  await writeFile(coreOverride, updateNativeDocument(await readFile(coreOverride, 'utf8'), 'yaml', [{ path: ['llm', 'model'], delete: true }]));
+  const { captureNativeConfiguration } = await import('../dist/config/native-state.js');
+  const before = await captureNativeConfiguration(f.directory);
+  await showConnectionDetails(f.ui, f.directory, { listKeys: async () => [] });
+  const core = f.output.find(text => text.startsWith('Core — native internal LLM'));
+  assert.ok(core.includes(`${join(root, 'defaults/core.yaml')} llm.model`));
+  assert.ok(core.includes(`${join(root, 'overrides/core.yaml')} llm.baseUrl`));
+  assert.ok(core.includes(`${join(root, 'overrides/core.yaml')} llm.apiKey`));
+  assert.equal(await captureNativeConfiguration(f.directory), before);
+  assert.equal(f.notes.length, 0, 'secrets belong only on the explicitly requested details screen');
+  assert.match(f.output.join('\n'), /Knowledge — native internal LLM/);
+  assert.match(f.output.join('\n'), /MemoryProxy — native administration/);
 });

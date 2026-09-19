@@ -59,14 +59,14 @@ test('TDAI update snapshot retains the applied source while the desired source c
   assert.equal(await readFile(previous, 'utf8'), 'original source');
 });
 
-test('legacy applied settings restore the packaged source rather than a new installation pin', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'ams-legacy-source-'));
+test('incomplete applied input records fail before changing the settings snapshot', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'ams-incomplete-snapshot-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await mkdir(join(dir, '.ams'));
   await writeFile(join(dir, '.ams/last-applied-inputs.json'), JSON.stringify({ '.env': null, '.ams/runtime.json': null }));
   await writeFile(join(dir, '.ams/tdai-source.json'), 'new source');
   await snapshotSettings(dir);
-  await restoreSnapshotInputs(dir);
-  await assert.rejects(readFile(join(dir, '.ams/previous-settings/.ams/tdai-source.json')), { code: 'ENOENT' });
+  await assert.rejects(restoreSnapshotInputs(dir), /Invalid saved input snapshot/);
+  assert.equal(await readFile(join(dir, '.ams/previous-settings/.ams/tdai-source.json'), 'utf8'), 'new source');
   assert.equal(await readFile(join(dir, '.ams/tdai-source.json'), 'utf8'), 'new source');
 });

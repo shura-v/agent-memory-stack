@@ -1,8 +1,9 @@
 import { lstat, mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { captureNativeConfiguration } from '../config/native-state.js';
 import { atomicWrite } from '../config/files.js';
 
-const inputPaths = ['.env', '.ams/runtime.json', '.ams/network.json', '.ams/tdai-source.json'] as const;
+const inputPaths = ['.env', '.ams/runtime.json', '.ams/tdai-source.json', '.ams/images.json', '.ams/native-config.json', '.ams/native-runtime.json', '.ams/native-backup.json'] as const;
 type Inputs = Record<typeof inputPaths[number], string | null>;
 
 export async function exists(path: string): Promise<boolean> {
@@ -19,7 +20,8 @@ async function readInput(path: string): Promise<string | null> {
 }
 
 export async function captureInputs(directory: string): Promise<Inputs> {
-  return Object.fromEntries(await Promise.all(inputPaths.map(async path => [path, await readInput(join(directory, path))]))) as Inputs;
+  const native = await captureNativeConfiguration(directory);
+  return Object.fromEntries(await Promise.all(inputPaths.map(async path => [path, path === '.ams/native-backup.json' ? native : await readInput(join(directory, path))]))) as Inputs;
 }
 
 /** Preserve editable inputs without reading generated files owned by service UID 10001. */
@@ -37,9 +39,7 @@ export async function restoreSnapshotInputs(directory: string): Promise<void> {
     ?? await readInput(join(directory, '.ams/before-save.json'));
   if (raw === null) return;
   const inputs = JSON.parse(raw) as Inputs;
-  // Older snapshots can predate network provenance and installation-specific TDAI sources.
-  if (!inputs || inputPaths.some(path => inputs[path] !== null && typeof inputs[path] !== 'string'
-    && !(['.ams/network.json', '.ams/tdai-source.json'].includes(path) && inputs[path] === undefined))) {
+  if (!inputs || inputPaths.some(path => inputs[path] !== null && typeof inputs[path] !== 'string')) {
     throw new Error('Invalid saved input snapshot; existing settings were not replaced');
   }
   for (const path of inputPaths) {

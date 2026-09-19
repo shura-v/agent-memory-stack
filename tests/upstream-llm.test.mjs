@@ -5,13 +5,13 @@ import { randomUUID } from 'node:crypto';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { serviceConfigs } from '../dist/config/services.js';
-import { validateEnv } from '../dist/config/settings.js';
+import { prepareNativeConfiguration } from '../dist/config/native-state.js';
+import { resolveSettings } from '../dist/config/settings.js';
 
 const enabled = process.env.AMS_UPSTREAM_LLM_TEST === '1';
 const engine = process.env.AMS_CONTAINER_ENGINE ?? 'podman';
 const imagePrefix = process.env.AMS_TEST_IMAGE_PREFIX ?? 'agent-memory-stack';
-const settings = validateEnv({
+const settings = resolveSettings({
   MEMORY_PROXY_PUBLIC_URL: 'https://models.synthetic.invalid', KNOWLEDGE_PUBLIC_URL: 'https://wiki.synthetic.invalid',
   PANEL_PUBLIC_URL: 'https://panel.synthetic.invalid',
   LLM_BASE_URL: 'http://127.0.0.1:19387/fixture/v4', LLM_API_KEY: 'synthetic-\'"\\$literal-${DO_NOT_EXPAND}-`',
@@ -29,8 +29,9 @@ async function checkOutgoing(t, image, imports, expectedModel, expectedTokens, i
     await rm(directory, { recursive: true, force: true });
   });
   await chmod(directory, 0o755);
-  for (const [name, config] of Object.entries(serviceConfigs(settings))) {
-    await writeFile(join(directory, name), JSON.stringify(config), { mode: 0o644 });
+  const native = await prepareNativeConfiguration(join(directory, 'runtime'), settings, { root: join(directory, 'native') });
+  for (const [name, text] of Object.entries(native.documents)) {
+    await writeFile(join(directory, name), text, { mode: 0o644 });
   }
   await writeFile(join(directory, 'expected.json'), JSON.stringify(settings), { mode: 0o644 });
   const identity = execFileSync(engine, ['image', 'inspect', '--format', '{{.Id}}', `${imagePrefix}/${image}:local`], { encoding: 'utf8' }).trim();
@@ -78,8 +79,9 @@ async function checkOutgoing(t, image, imports, expectedModel, expectedTokens, i
   `;
   const output = execFileSync(engine, [
     'run', '--rm', '--name', container, '-i', '--network', 'none', '--read-only', '--tmpfs', '/tmp',
-    '--mount', `type=bind,source=${directory},target=/config,readonly`, '--entrypoint', 'node', identity,
-    '--import', '/runtime/environment.mjs', ...imports, '--input-type=module', '-',
+    '--mount', `type=bind,source=${directory},target=/config,readonly`,
+    ...(image === 'core' ? ['-e', 'TDAI_GATEWAY_CONFIG=/config/core.yaml'] : ['--mount', `type=bind,source=${directory}/knowledge.env,target=/app/.env,readonly`]),
+    '--entrypoint', 'node', identity, ...imports, '--input-type=module', '-',
   ], { input: program, encoding: 'utf8', timeout: 45_000, stdio: ['pipe', 'pipe', 'pipe'] });
   const line = output.split('\n').find(value => value.includes('"marker":"UPSTREAM_LLM_OK"'));
   assert.ok(line, 'the real upstream client completed and the HTTP fixture verified the request');
@@ -89,7 +91,7 @@ async function checkOutgoing(t, image, imports, expectedModel, expectedTokens, i
   t.diagnostic(`${image}: ${identity}; ${observed.method} ${observed.path}; model=${observed.model}; exact Authorization confirmed`);
 }
 
-test('Core real StandaloneLLMRunner uses generated direct model settings on the wire', { skip: !enabled }, async t => {
+test('Core real StandaloneLLMRunner uses native direct model settings on the wire', { skip: !enabled }, async t => {
   await checkOutgoing(t, 'core', ['--import', 'tsx'], 'MEMORY_LLM_MODEL', 'MEMORY_LLM_MAX_TOKENS', `
     const { loadGatewayConfig } = await import('/app/src/gateway/config.ts');
     const { StandaloneLLMRunner } = await import('/app/src/adapters/standalone/llm-runner.ts');
@@ -100,7 +102,7 @@ test('Core real StandaloneLLMRunner uses generated direct model settings on the 
   `);
 });
 
-test('Knowledge bundled wiki LLM client uses its own generated model settings on the wire', { skip: !enabled }, async t => {
+test('Knowledge bundled wiki LLM client uses its own native model settings on the wire', { skip: !enabled }, async t => {
   await checkOutgoing(t, 'knowledge', [], 'KNOWLEDGE_LLM_MODEL', 'KNOWLEDGE_LLM_MAX_TOKENS', `
     const { loadConfig } = await import('/app/src/config.ts');
     const config = loadConfig();

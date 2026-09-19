@@ -47,29 +47,53 @@ export function verifyArchive(bytes: Uint8Array, expectedHash: string, name: str
   }
 }
 
+function sourceArchivePath(projectDir: string, name: string, source: SourceLock): string {
+  if (!/^[a-z]+$/.test(name) || !/^[a-f0-9]{40}$/.test(source.revision)) throw new Error(`Invalid source lock entry: ${name}`);
+  return resolve(buildContext(projectDir), '.cache/upstream', `${name}-${source.revision}.tar.gz`);
+}
+
+/** Verify before atomically adding an archive to the installation's download cache. */
+export async function cacheSourceArchive(projectDir: string, name: string, source: SourceLock, bytes: Uint8Array): Promise<string> {
+  const archive = sourceArchivePath(projectDir, name, source);
+  verifyArchive(bytes, source.sha256, name);
+  await mkdir(dirname(archive), { recursive: true });
+  const temporary = `${archive}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
+    await rename(temporary, archive);
+  } finally { await rm(temporary, { force: true }); }
+  return archive;
+}
+
+/** A corrupt cached archive is an error; only an absent archive is downloaded. */
+export async function acquireSourceArchive(projectDir: string, name: string, source: SourceLock,
+  { fetchImpl = fetch }: { fetchImpl?: typeof fetch } = {}): Promise<string> {
+  const archive = sourceArchivePath(projectDir, name, source);
+  let bytes: Buffer;
+  try { bytes = await readFile(archive); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    console.log(`Downloading ${name} ${source.revision}`);
+    const response = await fetchImpl(source.url, { signal: AbortSignal.timeout(300_000) });
+    if (!response.ok) throw new Error(`${name} download: HTTP ${response.status}`);
+    bytes = Buffer.from(await response.arrayBuffer());
+    return cacheSourceArchive(projectDir, name, source, bytes);
+  }
+  verifyArchive(bytes, source.sha256, name);
+  return archive;
+}
+
 /** The installed package supplies immutable inputs; all writes go to projectDir. */
-export async function fetchSources(projectDir = process.cwd()): Promise<string> {
-  const lock = await loadSourceLock(projectDir);
+export async function fetchSources(projectDir = process.cwd(), root = packageRoot): Promise<string> {
+  const lock = await loadSourceLock(projectDir, root);
   const cache = resolve(buildContext(projectDir), '.cache/upstream');
-  await mkdir(cache, { recursive: true });
   for (const [name, source] of Object.entries(lock.sources)) {
-    if (!/^[a-z]+$/.test(name) || !/^[a-f0-9]{40}$/.test(source.revision)) throw new Error(`Invalid source lock entry: ${name}`);
-    const archive = resolve(cache, `${name}-${source.revision}.tar.gz`);
-    let bytes: Buffer;
-    try { bytes = await readFile(archive); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      console.log(`Downloading ${name} ${source.revision}`);
-      const response = await fetch(source.url, { signal: AbortSignal.timeout(300_000) });
-      if (!response.ok) throw new Error(`${name} download: HTTP ${response.status}`);
-      bytes = Buffer.from(await response.arrayBuffer());
-    }
-    verifyArchive(bytes, source.sha256, name);
-    await writeFile(archive, bytes);
+    const archive = await acquireSourceArchive(projectDir, name, source);
     const temporary = resolve(cache, `${name}-${randomUUID()}`);
     await mkdir(temporary);
     try {
       execFileSync('tar', ['-xzf', archive, '--strip-components=1', '-C', temporary], { stdio: 'inherit' });
-      // Always restore clean sources: changing a patch can never reuse an old patched tree.
+      // Replace prepared trees with the verified archive, including its original dependency metadata.
       await rm(resolve(cache, name), { recursive: true, force: true });
       await rename(temporary, resolve(cache, name));
     } finally {
@@ -77,6 +101,5 @@ export async function fetchSources(projectDir = process.cwd()): Promise<string> 
     }
     console.log(`${name}: verified ${source.revision}`);
   }
-  execFileSync(process.execPath, [resolve(packageRoot, 'dist/patches/apply.js'), resolve(cache, 'tencent')], { stdio: 'inherit' });
   return cache;
 }

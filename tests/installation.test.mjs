@@ -32,7 +32,7 @@ test('complete stopped stack is detected before setup through either visible eng
 test('incomplete stacks, helper containers and unrelated project names do not count', async () => {
   for (const candidates of [
     containers(serviceNames.slice(1)),
-    containers(['core', 'config', 'bootstrap', 'access', 'knowledge-service']),
+    containers(['core', 'config', 'bootstrap', 'access']),
     containers(undefined, { 'com.docker.compose.project': 'other-stack' }),
     containers(undefined, { 'com.docker.compose.project': 'ams-0123456789-extra' }),
   ]) assert.equal(await detectExistingInstallation(runner({ docker: candidates }).run), undefined);
@@ -76,7 +76,24 @@ test('container discovery commands are bounded and stalled child processes termi
 });
 
 
-test('complete pre-MCP installations remain protected from repeat setup', async () => {
-  const old = containers(serviceNames.filter(service => service !== 'mcp'));
-  assert.deepEqual(await detectExistingInstallation(runner({ docker: old }).run), { engine: 'docker', project });
+test('complete stacks without optional MCP remain protected from repeat setup', async () => {
+  const withoutMcp = containers(serviceNames.filter(service => service !== 'mcp'));
+  assert.deepEqual(await detectExistingInstallation(runner({ docker: withoutMcp }).run), { engine: 'docker', project });
+});
+
+test('native configuration location comes only from consistent sanitized container labels', async () => {
+  const label = 'io.agent-memory-stack.native-config';
+  const working = { 'com.docker.compose.project.working_dir': '/tmp/runtime-installation' };
+  const found = await detectExistingInstallation(runner({ docker: containers(undefined, { ...working, [label]: '/tmp/custom-native-config' }) }).run);
+  assert.deepEqual(found, { engine: 'docker', project, directory: '/tmp/runtime-installation', nativeRoot: '/tmp/custom-native-config' });
+  const unlabelled = await detectExistingInstallation(runner({ docker: containers(undefined, working) }).run);
+  assert.deepEqual(unlabelled, { engine: 'docker', project, directory: '/tmp/runtime-installation' });
+  assert.equal(Object.hasOwn(unlabelled, 'nativeRoot'), false, 'a runtime directory must not imply an XDG or sibling config path');
+  for (const nativeRoot of ['relative/native', '/tmp/../native', '/tmp/native\nsecret', '/tmp/native\u001b[31m', '/tmp/\u202esecret']) {
+    const result = await detectExistingInstallation(runner({ docker: containers(undefined, { ...working, [label]: nativeRoot }) }).run);
+    assert.deepEqual(result, unlabelled);
+  }
+  const conflicting = containers(undefined, { ...working, [label]: '/tmp/native-first' });
+  conflicting[0].Config.Labels[label] = '/tmp/native-second';
+  assert.deepEqual(await detectExistingInstallation(runner({ docker: conflicting }).run), unlabelled);
 });

@@ -1,7 +1,3 @@
-import { apiBase } from '../config/settings.js';
-import { serviceEndpoint } from './service-identity.js';
-import { DeploymentError } from './errors.js';
-import { pathToFileURL } from 'node:url';
 
 export type ModelDiscovery = (baseUrl: string, apiKey: string) => Promise<string[]>;
 
@@ -9,12 +5,6 @@ export class ModelAccessError extends Error {
   constructor(readonly status: 401 | 403) {
     super(status === 401 ? 'The API rejected your key (HTTP 401). Check the API key and base URL.'
       : 'The API denied access to the model list (HTTP 403). Check the API key, permissions, and base URL.');
-  }
-}
-
-export class InternalModelAccessError extends DeploymentError {
-  constructor(readonly status: 401 | 403) {
-    super(`CLIProxyAPI rejected internal model discovery (HTTP ${status}). Check CLIPROXY_API_KEY and the selected account authorization, then retry ams apply.`);
   }
 }
 
@@ -26,8 +16,7 @@ export async function discoverModels(baseUrl: string, apiKey: string, fetcher: t
   const limit = 1024 * 1024;
   const load = async (): Promise<string[]> => {
     try {
-      const url = serviceEndpoint(apiBase(baseUrl), '/models');
-      if (!apiKey || apiKey.trim() !== apiKey || /[\x00-\x1f\x7f]/.test(apiKey)) return [];
+      const url = `${baseUrl.replace(/\/+$/, '')}/models`;
       const response = await fetcher(url, {
         method: 'GET', headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
         redirect: 'error', signal: controller.signal,
@@ -66,21 +55,5 @@ export async function discoverModels(baseUrl: string, apiKey: string, fetcher: t
     clearTimeout(timer);
     controller.abort();
     void reader?.cancel().catch(() => {});
-  }
-}
-
-// Runtime containers receive credentials through stdin, never process arguments.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try {
-    const chunks: Buffer[] = []; let size = 0;
-    for await (const chunk of process.stdin) {
-      const bytes = Buffer.from(chunk); size += bytes.length;
-      if (size > 64 * 1024) throw new Error('Discovery input exceeds limit');
-      chunks.push(bytes);
-    }
-    const input = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { baseUrl: string; apiKey: string };
-    console.log(JSON.stringify({ models: await discoverModels(input.baseUrl, input.apiKey) }));
-  } catch (error) {
-    console.log(JSON.stringify(error instanceof ModelAccessError ? { models: [], status: error.status } : { models: [] }));
   }
 }

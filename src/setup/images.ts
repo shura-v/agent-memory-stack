@@ -1,16 +1,18 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir, copyFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { buildImages, imageServices, validateDeploymentImages, validateImageManifest } from '../build/images.js';
 import type { ContainerRuntime, ImageManifest, ImagePlatform, ImageService } from '../build/images.js';
 import { DeploymentError } from '../runtime/errors.js';
 import { runProcess } from '../runtime/process.js';
 import type { Runner } from '../runtime/process.js';
+import { atomicWrite } from '../config/files.js';
+import { validateTdaiSource, type SourceLock } from '../build/sources.js';
 import { buildFingerprint, buildFingerprintLabel } from '../build/fingerprint.js';
 
 export interface PrepareImagesOptions {
   projectDir: string;
+  source?: SourceLock;
   runtime: ContainerRuntime;
-  services: ImageService[];
   note?: (message: string) => void;
 }
 
@@ -38,13 +40,32 @@ async function enginePlatform(runtime: ContainerRuntime, run: Runner): Promise<I
 
 /** Reuse only verified images built from current inputs; retain installation metadata. */
 export async function prepareImages(options: PrepareImagesOptions, dependencies: ImagePreparationDependencies = {}): Promise<ImageManifest> {
+  if (!options.source) {
+    try { options = { ...options, source: validateTdaiSource(JSON.parse(await readFile(resolve(options.projectDir, '.ams/pending-tdai-source.json'), 'utf8'))) }; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
+  if (options.source) {
+    const stage = resolve(options.projectDir, '.ams/build-candidates', options.source.revision);
+    await mkdir(resolve(stage, '.ams'), { recursive: true, mode: 0o700 });
+    await atomicWrite(resolve(stage, '.ams/tdai-source.json'), JSON.stringify(options.source));
+    for (const name of ['pending-images.json', 'images.json']) {
+      try { await copyFile(resolve(options.projectDir, '.ams', name), resolve(stage, '.ams/images.json')); break; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    const cache = resolve(options.projectDir, '.ams-build/.cache/upstream');
+    const destination = resolve(stage, '.ams-build/.cache/upstream');
+    await mkdir(destination, { recursive: true });
+    try { for (const name of await readdir(cache)) if (/^[a-z]+-[a-f0-9]{40}\.tar\.gz$/.test(name)) await copyFile(resolve(cache, name), resolve(destination, name)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    return prepareImages({ ...options, projectDir: stage, source: undefined }, dependencies);
+  }
   const { projectDir, runtime, note } = options;
-  const required = [...new Set(options.services)];
+  const required = imageServices;
   if (!['docker', 'podman'].includes(runtime)) throw new DeploymentError('Container runtime must be docker or podman');
-  if (!required.length || required.some(service => !imageServices.includes(service))) throw new DeploymentError('Invalid required image selection');
   const run = dependencies.run ?? runProcess;
   const platform = await enginePlatform(runtime, run);
-  const manifestPath = resolve(projectDir, '.ams/images.json');
+  let manifestPath = resolve(projectDir, '.ams/pending-images.json');
+  try { await readFile(manifestPath); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; manifestPath = resolve(projectDir, '.ams/images.json'); }
   let manifest: ImageManifest = { schemaVersion: 1, images: {} };
   try {
     manifest = validateImageManifest(JSON.parse(await readFile(manifestPath, 'utf8')), false, platform);
@@ -85,5 +106,5 @@ export async function prepareImages(options: PrepareImagesOptions, dependencies:
     note?.(`Building missing or outdated images: ${missing.join(', ')} (${platform}). The first build downloads sources and dependencies and can take several minutes.`);
     manifest = await (dependencies.build ?? buildImages)({ projectDir, runtime, platform, services: missing, manifest, persist: false });
   }
-  return validateDeploymentImages(manifest, required, platform);
+  return validateDeploymentImages(manifest, platform);
 }

@@ -1,21 +1,10 @@
-import { DeploymentError } from "../runtime/errors.js";
 import { randomBytes } from 'node:crypto';
-import { resolveDeployment, selectionFromEnv } from '../deployment/model.js';
+import { resolveDeployment } from '../deployment/model.js';
 import { accountProviders } from './providers.js';
-import { internalLLM, internalModelFields, usesLocalInternalModels } from './internal-llm.js';
+import { internalLLM, usesLocalInternalModels } from './internal-llm.js';
 
 export type Field = { name: string; label: string; default?: string; placeholder?: string; secret?: boolean; role?: 'core' | 'cliproxy'; choices?: string[] };
 export const fields: Field[] = [
-  { name: 'AMS_DEPLOYMENT_VERSION', label: 'Deployment schema version', default: '1' },
-  { name: 'AMS_SERVICES', label: 'Services on this machine', default: 'core,knowledge,panel,memory-proxy,cli-proxy-api,mcp' },
-  ...['CORE', 'MODEL', 'KNOWLEDGE', 'PANEL', 'PROXY'].map(prefix => ({ name: `${prefix}_MODE`, label: `${prefix} dependency mode`, choices: ['local', 'remote', 'disabled'] })),
-  { name: 'REMOTE_CORE_URL', label: 'Remote Core service base URL (reachable from containers)' },
-  { name: 'REMOTE_CORE_API_KEY', label: 'Existing remote Core service key (use the key from the machine running Core)', secret: true },
-  { name: 'REMOTE_MODEL_BASE_URL', label: 'Remote model API base URL (including its API prefix)' },
-  { name: 'REMOTE_MODEL_API_KEY', label: 'Existing remote model API key', secret: true },
-  { name: 'REMOTE_KNOWLEDGE_URL', label: 'Remote authenticated Knowledge service base URL' },
-  { name: 'REMOTE_KNOWLEDGE_TOOLS_URL', label: 'Remote protected Knowledge tools base URL' },
-  { name: 'REMOTE_PANEL_URL', label: 'Remote Panel callback base URL (reachable from containers)' },
   ...['CORE', 'CLIPROXY', 'KNOWLEDGE'].map(prefix => ({ name: `${prefix}_SERVICE_ENABLED`, label: `Allow ${prefix} service connections from another machine`, default: 'false', choices: ['false', 'true'] })),
   { name: 'KNOWLEDGE_TOOLS_PUBLIC_ENABLED', label: 'Expose authenticated Knowledge HTTP tools', default: 'false', choices: ['false', 'true'] },
   { name: 'CORE_SERVICE_PORT', label: 'Core authenticated service loopback port', default: '8420' },
@@ -49,58 +38,20 @@ export const defaults = Object.fromEntries(fields.filter(f => f.default !== unde
 export function generateKey(role: 'admin' | 'core' | 'cliproxy'): string {
   return `sk-ams-${role}-${randomBytes(32).toString('hex')}`;
 }
-export function origin(value: string): string {
-  const url = new URL(value);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash
-    || /(?:^|\.)example\.(?:com|net|org)$/i.test(url.hostname)) throw new DeploymentError('Enter an HTTP(S) origin without an API path');
-  return url.origin;
+/** Settings whose values belong to the operator's native TDAI documents. */
+export function isNativeSetting(name: string): boolean {
+  return /^(CORE_API_KEY|LLM_BASE_URL|LLM_API_KEY|MEMORY_LLM_.*|KNOWLEDGE_LLM_.*|MEMORY_PROMPT_MODE|MEMORY_PROXY_PUBLIC_URL|KNOWLEDGE_PUBLIC_URL)$/.test(name);
 }
-export function apiBase(value: string): string {
-  const url = new URL(value);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash
-    || /\/(?:responses|chat\/completions)\/?$/.test(url.pathname)
-    || /(?:^|\.)example\.(?:com|net|org)$/i.test(url.hostname)) throw new DeploymentError('Enter an HTTP(S) service API base');
-  return value.replace(/\/+$/, '');
-}
-export function validateField(field: Field, value: string): string | undefined {
-  if (!value.trim() || /[\x00-\x1f\x7f]/.test(value) || /^(?:your[-_ ]|replace|changeme|<)/i.test(value)) return `Set ${field.name}`;
-  if (field.name.endsWith('_PUBLIC_URL')) { try { origin(value); } catch { return `Set a valid HTTP(S) origin for ${field.name}`; } }
-  if (field.name === 'LLM_BASE_URL' || /^REMOTE_.*_URL$/.test(field.name)) {
-    try { apiBase(value); } catch { return `Set an HTTP(S) API base in ${field.name}`; }
-  }
-  if (field.name.endsWith('_PORT') && (!/^\d+$/.test(value) || Number(value) < 1024 || Number(value) > 65535)) return `Set ${field.name} to 1024–65535`;
-  if (/_MAX_TOKENS$|_TIMEOUT_MS$/.test(field.name) && (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value)))) return `Set a positive integer for ${field.name}`;
-  if (field.choices && !field.choices.includes(value)) return `Choose ${field.name} from the listed values`;
-  if (field.name === 'DATA_DIR' && /[$:]/.test(value)) return 'DATA_DIR must not contain $ or :';
-  if (field.secret && value.trim() !== value) return `Remove surrounding whitespace from ${field.name}`;
-  return undefined;
-}
-export function validateEnv(input: Record<string, string>, { allowPendingModels = false }: { allowPendingModels?: boolean } = {}): Record<string, string> {
-  const selected = selectionFromEnv(input);
-  const env = { ...defaults, ...input };
-  env.AMS_SERVICES = selected.join(',');
-  for (const [prefix, port] of [['MEMORY_PROXY', '8096'], ['KNOWLEDGE', '8422'], ['PANEL', '8123']]) {
-    if (input[`${prefix}_PUBLIC_URL`] === undefined) env[`${prefix}_PUBLIC_URL`] = `http://127.0.0.1:${env[`${prefix}_PORT`] ?? port}`;
-  }
-  const deployment = resolveDeployment(env, { requireConnections: false });
-  const consumed = fields.filter(field => deployment.fields.includes(field.name));
-  const pending = new Set<string>(allowPendingModels && usesLocalInternalModels(env) ? internalModelFields(env).filter(name => !env[name]) : []);
-  const errors = consumed.filter(f => !pending.has(f.name) && validateField(f, env[f.name] ?? '')).map(f => f.name);
-  if (selected.includes('core') && selected.includes('cli-proxy-api') && env.CORE_API_KEY === env.CLIPROXY_API_KEY) errors.push('CLIPROXY_API_KEY');
-  if (Object.keys(input).some(k => !fields.some(f => f.name === k))) errors.push('unknown settings (use the current template)');
-  if (deployment.connections.knowledge.mode === 'remote' && env.KNOWLEDGE_TOOLS_PUBLIC_ENABLED === 'true' && !input.KNOWLEDGE_PUBLIC_URL) errors.push('KNOWLEDGE_PUBLIC_URL (explicit remote origin required)');
-  if (deployment.connections.proxy.mode === 'remote' && !input.MEMORY_PROXY_PUBLIC_URL) errors.push('MEMORY_PROXY_PUBLIC_URL (explicit remote origin required)');
-  if (errors.length) throw new DeploymentError(`Set valid values in .env: ${[...new Set(errors)].join(', ')}`);
-  for (const f of consumed.filter(f => f.name.endsWith('_PUBLIC_URL'))) env[f.name] = origin(env[f.name]);
-  for (const f of consumed.filter(f => f.name === 'LLM_BASE_URL' || /^REMOTE_.*_URL$/.test(f.name))) env[f.name] = apiBase(env[f.name]);
-  for (const [name, connection] of Object.entries(deployment.connections).filter(([name]) => name !== 'knowledgeTools')) env[`${name.toUpperCase()}_MODE`] = connection.mode;
+/** Fill AMS defaults without interpreting or changing supplied values. */
+export function resolveSettings(input: Record<string, string>): Record<string, string> {
+  const env = { ...Object.fromEntries(Object.entries(defaults).filter(([name]) => !isNativeSetting(name))), ...input };
+  if (input.PANEL_PUBLIC_URL === undefined) env.PANEL_PUBLIC_URL = `http://127.0.0.1:${env.PANEL_PORT}`;
   return env;
 }
 export function reviewSettings(env: Record<string, string>): string {
-  const consumed = resolveDeployment(env, { requireConnections: false }).fields;
+  const consumed = resolveDeployment(env).fields;
   const local = usesLocalInternalModels(env);
-  const models = internalModelFields(env);
-  const lines = fields.filter(f => consumed.includes(f.name)).map(f => `${f.name}: ${f.secret ? '[set]' : local && models.includes(f.name as typeof models[number]) && !env[f.name] ? '[select after CLIProxyAPI authorization]' : env[f.name]}`);
+  const lines = fields.filter(f => consumed.includes(f.name)).map(f => `${f.name}: ${f.secret ? '[set]' : env[f.name] ?? ''}`);
   if (local) lines.push(`Effective internal API base URL: ${internalLLM(env).baseURL}`, 'Effective internal API key: CLIPROXY_API_KEY [set]');
   return lines.join('\n');
 }

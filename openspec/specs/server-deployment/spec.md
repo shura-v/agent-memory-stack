@@ -159,17 +159,22 @@ Panel startup SHALL preserve the direct Core/Knowledge LLM configuration. Server
 - **THEN** the request reaches the configured internal LLM endpoint with the Knowledge model
 - **AND** it does not depend on an online client or replace the binding with the agent model
 
-### Requirement: Authenticated exposed APIs and private operations
+### Requirement: Authenticated APIs and operator-controlled exposure
 
-Loopback model/tool endpoints SHALL enforce application authentication even when accessed directly on the VPS. Knowledge and memory/skill tools SHALL enforce the caller's permitted team/assets and session identity. Bootstrap, destruction, account-file management and internal administration SHALL remain outside the exposed method/path allowlist. Panel SHALL use its normal user authentication.
+Loopback model/tool endpoints SHALL enforce application authentication even when accessed directly on the VPS. Knowledge and memory/skill tools SHALL enforce the caller's permitted team/assets and session identity. MemoryProxy SHALL use native upstream routing without an AMS method/path/query allowlist. Panel SHALL use its normal user authentication. Published listeners SHALL retain their default loopback bindings. The operator SHALL control network exposure through their own reverse proxy and firewall; AMS SHALL NOT install route restrictions in Caddy.
 
 #### Scenario: Invalid credential or unauthorized asset
 - **WHEN** a caller supplies an invalid key, another user's session or an inaccessible asset
 - **THEN** the exposed endpoint rejects the operation before protected content is returned
 
-#### Scenario: Internal administration through an exposed port
-- **WHEN** a caller requests Core initialization/destruction, CLIProxyAPI management or another internal-only route through a user-facing entry point
-- **THEN** the operation is rejected regardless of the caller's ordinary user key
+#### Scenario: Native agent request with query parameters
+- **WHEN** an authenticated agent sends a request such as `/claude-code/ams/v1/messages?beta=true`
+- **THEN** AMS passes the request to MemoryProxy's native handlers without filtering or rewriting its path, method, query, or body
+
+#### Scenario: Operator publishes a service
+- **WHEN** the operator adds the documented Caddy reverse proxy for a service
+- **THEN** that service's native routes remain reachable subject to application authentication
+- **AND** any additional network or route restrictions belong to the operator's configuration
 
 ### Requirement: Streaming and readiness remain observable
 

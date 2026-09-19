@@ -10,7 +10,7 @@ async function listen(server) {
 }
 async function fixture(t, { realWorkers = false } = {}) {
   const calls = [], launches = [], upstreamCalls = [], createdWorkers = [];
-  const state = { inactive: false, revoked: false, mismatched: false, unavailable: false, streaming: false, streamClosed: false, failInitialization: false };
+  const state = { inactive: false, revoked: false, unavailable: false, streaming: false, streamClosed: false, failInitialization: false };
   let sequence = 0;
   const backend = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -24,7 +24,7 @@ async function fixture(t, { realWorkers = false } = {}) {
     if (state.streaming) { res.write(event); res.once('close', () => { state.streamClosed = true; }); } else res.end(event);
   });
   const upstream = await listen(backend);
-  const workers = new McpWorkers(realWorkers ? supergatewayFactory(upstream, 'ams') : async key => {
+  const workers = new McpWorkers(realWorkers ? supergatewayFactory(upstream, new URL('./fixtures/mcp-stdio.mjs', import.meta.url).pathname) : async key => {
     launches.push(key); let alive = true;
     const worker = { url: upstream + '/mcp', sessions: new Map(), pending: 0, alive: () => alive, stop: async () => { alive = false; } };
     createdWorkers.push(worker); return worker;
@@ -32,7 +32,6 @@ async function fixture(t, { realWorkers = false } = {}) {
   const fetcher = async (url, init) => {
     const endpoint = new URL(url); calls.push(endpoint.pathname);
     if (state.unavailable) throw new Error('secret credentials');
-    if (endpoint.pathname === '/ams/identity') return Response.json({ coreId: state.mismatched && endpoint.hostname === 'tools' ? 'other' : 'core-one', ...(endpoint.hostname === 'tools' ? { knowledgeId: 'knowledge-one' } : {}) });
     const data = JSON.parse(init.body);
     if (endpoint.pathname.endsWith('/auth/verify')) return Response.json({ code: 0, data: { valid: !state.revoked && ['alice', 'bob', 'alice-new'].includes(data.user_key), user: { user_id: data.user_key.startsWith('alice') ? 'alice' : 'bob' } } });
     return Response.json({ code: 0, data: { total: state.inactive ? 0 : 1, items: state.inactive ? [] : [{ user_id: data.user_ids[0], status: 'active' }] } });
@@ -70,10 +69,8 @@ test('MCP revalidates current user status and credential on every lifecycle requ
   assert.equal(f.upstreamCalls.length, 1);
 });
 
-test('MCP fails closed on mismatched dependencies and auth outage without leaking errors', async t => {
-  const f = await fixture(t); f.state.mismatched = true;
-  assert.equal((await f.request()).status, 503); assert.equal(f.launches.length, 0);
-  f.state.mismatched = false; f.state.unavailable = true;
+test('MCP fails closed on auth outage without leaking errors', async t => {
+  const f = await fixture(t); f.state.unavailable = true;
   const response = await f.request(); assert.equal(response.status, 503); assert.doesNotMatch(await response.text(), /secret|credentials/);
 });
 
@@ -164,7 +161,7 @@ test('session capacity is bounded and expired session slots are reusable', async
   assert.equal(f.createdWorkers[0].sessions.size, 1);
 });
 
-test('failed initialization reaps the worker and unregistered adapter', async t => {
+test('failed initialization reaps the worker and unregistered stdio child', async t => {
   const f = await fixture(t); f.state.failInitialization = true;
   const response = await f.request(); assert.equal(response.status, 400); await response.text();
   await new Promise(resolve => setTimeout(resolve, 5));
@@ -209,7 +206,7 @@ test('real Supergateway keeps a session usable after another initialization retu
   const failed = await f.request({ headers: { 'content-type': 'application/json; charset=iso-8859-1' } });
   assert.equal(failed.status, 415); await failed.text();
   const next = await f.request({ session, body: { jsonrpc: '2.0', method: 'tools/list', id: 2 } });
-  assert.equal(next.status, 200); assert.match(await next.text(), /list_knowledge_tools/);
+  assert.equal(next.status, 200); assert.match(await next.text(), /transport_probe/);
   const deleted = await f.request({ method: 'DELETE', session });
   assert.equal(deleted.status, 200); await deleted.text();
 });
@@ -225,7 +222,7 @@ test('real Supergateway accepts the corrected initialization immediately after a
   const ready = await f.request({ session, body: { jsonrpc: '2.0', method: 'notifications/initialized' } });
   assert.equal(ready.status, 202); await ready.text();
   const tools = await f.request({ session, body: { jsonrpc: '2.0', method: 'tools/list', id: 2 } });
-  assert.equal(tools.status, 200); assert.match(await tools.text(), /list_knowledge_tools/);
+  assert.equal(tools.status, 200); assert.match(await tools.text(), /transport_probe/);
 });
 
 for (const method of ['POST', 'GET', 'DELETE']) test(`real Supergateway lost session returns 404 for ${method} and permits a fresh initialization`, { timeout: 20_000 }, async t => {
@@ -248,7 +245,7 @@ for (const method of ['POST', 'GET', 'DELETE']) test(`real Supergateway lost ses
   const initialized = await f.request({ session: freshSession, body: { jsonrpc: '2.0', method: 'notifications/initialized' } });
   assert.equal(initialized.status, 202); await initialized.text();
   const tools = await f.request({ session: freshSession, body: { jsonrpc: '2.0', method: 'tools/list', id: 5 } });
-  assert.equal(tools.status, 200); assert.match(await tools.text(), /list_knowledge_tools/);
+  assert.equal(tools.status, 200); assert.match(await tools.text(), /transport_probe/);
 });
 
 for (const method of ['POST', 'GET', 'DELETE']) test(`${method} ordinary, non-JSON and oversized upstream 400 responses preserve their bytes and session`, async t => {

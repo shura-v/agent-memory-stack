@@ -84,9 +84,9 @@ test('Configure stack forwards the fixed directory without creating a targets re
   assert.deepEqual(await readdir(directory), []);
 });
 
-test('existing stack guard runs after menu selection and gives truthful legacy Compose guidance', async t => {
+test('existing stack guard runs after menu selection and gives truthful existing Compose guidance', async t => {
   const directory = await fixture(t, false);
-  for (const location of [directory, join(directory, 'legacy stack'), undefined]) {
+  for (const location of [directory, join(directory, 'other stack'), undefined]) {
     const notes = [], calls = [];
     await executeCommand(parseCommand([]), { note: (...args) => notes.push(args), select: async id => {
       assert.equal(id, 'action'); calls.push('menu'); return 'configure';
@@ -158,4 +158,25 @@ test('TDAI update requires an interactive terminal before reading configuration 
   assert.throws(() => execFileSync(process.execPath, [cli.pathname, 'update', 'tdai'], { stdio: 'pipe' }), error => {
     assert.match(error.stderr.toString(), /Run ams in an interactive terminal/); return error.status === 1;
   });
+});
+
+test('existing native stack guidance names recorded defaults and overrides without guessing a root', async t => {
+  const directory = await fixture(t, false);
+  for (const nativeRoot of [join(directory, 'custom-native'), undefined]) {
+    const notes = [];
+    await executeCommand(parseCommand([]), { note: text => notes.push(text), select: async () => 'configure' }, {
+      directory,
+      detectInstallation: async () => ({ engine: 'podman', project: 'ams-1234567890', directory, nativeRoot }),
+      workflows: { setupServer: forbidden, applyServer: forbidden },
+    });
+    const guidance = notes.join('\n');
+    if (nativeRoot) {
+      assert.ok(guidance.includes(join(nativeRoot, 'defaults')));
+      assert.ok(guidance.includes(join(nativeRoot, 'overrides')));
+    } else {
+      assert.match(guidance, /saved native configuration reference/);
+      assert.doesNotMatch(guidance, /\.config\/agent-memory-stack|custom-native/);
+    }
+    assert.match(guidance, /ams apply/);
+  }
 });

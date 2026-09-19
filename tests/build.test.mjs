@@ -1,15 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { fetchSources, loadSourceLock, packageRoot } from '../dist/build/sources.js';
+import { acquireSourceArchive, cacheSourceArchive, fetchSources, loadSourceLock, packageRoot, validateTdaiSource } from '../dist/build/sources.js';
 import { imageServices, prepareBuildContext, validateImageManifest, validateDeploymentImages } from '../dist/build/images.js';
-import { exportImages, loadImages, runtimePlatform } from '../dist/build/bundle.js';
+import { exportImages, loadImages } from '../dist/build/bundle.js';
 import { buildFingerprint, buildFingerprintLabel, contextPackageJson } from '../dist/build/fingerprint.js';
 import { prepareImages } from '../dist/setup/images.js';
+import { setupServer } from '../dist/setup/server.js';
+import { getNativeTemplates } from '../dist/config/native-templates.js';
+import { prepareNativeConfiguration, saveNativeConfiguration } from '../dist/config/native-state.js';
+import { createNativeSourceFixture, installNativeSourceFixture } from './fixtures/native-source.mjs';
 
 test('deployment manifest rejects incomplete and mixed-architecture image sets', () => {
   assert.throws(() => validateImageManifest({ schemaVersion: 1, images: [] }, false), /Invalid image manifest/);
@@ -22,7 +26,7 @@ test('deployment manifest rejects incomplete and mixed-architecture image sets',
   assert.throws(() => validateImageManifest({ schemaVersion: 1, images }), /Missing image: panel/);
 });
 
-test('a tampered cached archive fails before extraction or patch execution', async () => {
+test('a tampered cached archive fails before extraction', async () => {
   const project = await mkdtemp(resolve(tmpdir(), 'ams-build-tamper-'));
   try {
     const lock = JSON.parse(await readFile(resolve(packageRoot, 'upstream.lock.json'), 'utf8'));
@@ -34,14 +38,98 @@ test('a tampered cached archive fails before extraction or patch execution', asy
   } finally { await rm(project, { recursive: true, force: true }); }
 });
 
-test('placement preflight requires its image subset while validating any additional identities', () => {
+test('verified source preparation preserves source and dependency bytes and replaces modified prepared trees', async t => {
+  const root = await mkdtemp(resolve(tmpdir(), 'ams-stock-sources-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const project = resolve(root, 'installation');
+  const packageDirectory = resolve(root, 'package');
+  const original = resolve(root, 'archive/source');
+  const cache = resolve(project, '.ams-build/.cache/upstream');
+  const files = {
+    'MemoryCore/package.json': '{"dependencies":{"native-addon":"^1.0.0"},"peerDependencies":{"upstream-peer":"*"}}\n',
+    'MemoryCore/src/gateway/server.ts': '// Original upstream implementation\nexport const version = "stock";\n',
+    'MemoryKnowledge/package.json': '{"scripts":{"build":"tsdown"}}\n',
+    'MemoryKnowledge/.npmrc': 'legacy-peer-deps=true\n',
+    'MemoryPanel/package.json': '{"name":"stock-panel"}\n',
+    'MemoryPanel/package-lock.json': '{"lockfileVersion":3,"packages":{}}\n',
+    'MemoryPanel/web/package.json': '{"name":"stock-panel-web"}\n',
+    'MemoryPanel/web/package-lock.json': '{"lockfileVersion":3,"packages":{}}\n',
+    'MemoryProxy/package.json': '{"name":"stock-proxy"}\n',
+    'MemoryProxy/package-lock.json': '{"lockfileVersion":3,"packages":{}}\n',
+    'MemoryProxy/src/index.ts': 'if (process.versions.node.split(".")[0] !== "22") process.exit(1);\n',
+  };
+  for (const [name, value] of Object.entries(files)) {
+    await mkdir(resolve(original, name, '..'), { recursive: true });
+    await writeFile(resolve(original, name), value);
+  }
+  await mkdir(cache, { recursive: true });
+  await mkdir(packageDirectory);
+  const revision = 'a'.repeat(40);
+  const archive = resolve(cache, `tencent-${revision}.tar.gz`);
+  execFileSync('tar', ['-czf', archive, '-C', resolve(original, '..'), 'source']);
+  const source = { revision, url: 'https://example.invalid/never-downloaded',
+    sha256: createHash('sha256').update(await readFile(archive)).digest('hex') };
+  await writeFile(resolve(packageDirectory, 'upstream.lock.json'), JSON.stringify({ sources: { tencent: source }, images: {} }));
+  const prepared = resolve(cache, 'tencent');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await mkdir(resolve(prepared, 'MemoryProxy/src'), { recursive: true });
+    await writeFile(resolve(prepared, 'MemoryProxy/src/injected.ts'), 'abandoned local adaptation');
+    await writeFile(resolve(prepared, 'MemoryProxy/package.json'), '{"dependencies":{"replacement":"1.0.0"}}');
+    assert.equal(await fetchSources(project, packageDirectory), cache);
+    for (const name of Object.keys(files)) {
+      assert.deepEqual(await readFile(resolve(prepared, name)), await readFile(resolve(original, name)), name);
+    }
+    await assert.rejects(readFile(resolve(prepared, 'MemoryProxy/src/injected.ts')), { code: 'ENOENT' });
+    await prepareBuildContext(project);
+    for (const name of Object.keys(files)) {
+      assert.deepEqual(await readFile(resolve(prepared, name)), await readFile(resolve(original, name)), `build context: ${name}`);
+    }
+  }
+});
+
+test('TDAI build recipe uses stock dependency metadata and stock service entrypoints', async () => {
+  const recipe = (await readFile(resolve(packageRoot, 'deploy/node.Dockerfile'), 'utf8')).split('FROM base AS mcp')[0];
+  assert.match(recipe, /^FROM docker.io\/library\/node:22-bookworm-slim@sha256:[a-f0-9]{64} AS base$/m);
+  assert.doesNotMatch(recipe, /deploy\/locks|dist\/runtime|dist\/build|AMS_ENV_FILE|ams-integration|npm pkg|npm install --save/);
+  for (const service of ['MemoryCore', 'MemoryKnowledge', 'MemoryPanel', 'MemoryPanel/web', 'MemoryProxy']) {
+    assert.ok(recipe.includes(`COPY .cache/upstream/tencent/${service}/ ./`), service);
+  }
+  assert.match(recipe, /"--import", "tsx", "src\/gateway\/server.ts"/);
+  assert.match(recipe, /"--import", "tsx\/esm", "src\/index.ts"/);
+  assert.match(recipe, /"node", "dist\/server.mjs"/);
+  assert.match(recipe, /"node", "dist\/index.js"/);
+  for (const directory of ['core', 'knowledge', 'panel', 'panel-web', 'proxy']) {
+    await assert.rejects(readFile(resolve(packageRoot, `deploy/locks/${directory}/package.json`)), { code: 'ENOENT' });
+  }
+  assert.equal(JSON.parse(await readFile(resolve(packageRoot, 'deploy/locks/mcp/package.json'), 'utf8')).name, 'ams-mcp-runtime');
+});
+
+test('source acquisition downloads once and rejects corrupt cache without substituting bytes', async t => {
+  const root = await mkdtemp(resolve(tmpdir(), 'ams-source-acquisition-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const fixture = createNativeSourceFixture();
+  let downloads = 0;
+  const fetchImpl = async address => { downloads++; assert.equal(address, fixture.source.url); return new Response(fixture.bytes); };
+  const archive = await acquireSourceArchive(root, 'tencent', fixture.source, { fetchImpl });
+  assert.deepEqual(await readFile(archive), fixture.bytes);
+  assert.equal(await acquireSourceArchive(root, 'tencent', fixture.source, { fetchImpl }), archive);
+  assert.equal(downloads, 1);
+  await writeFile(archive, 'corrupted cached archive');
+  await assert.rejects(acquireSourceArchive(root, 'tencent', fixture.source, { fetchImpl }), /SHA-256 mismatch/);
+  assert.equal(downloads, 1);
+  assert.equal(await readFile(archive, 'utf8'), 'corrupted cached archive');
+  await rm(archive);
+  await assert.rejects(acquireSourceArchive(root, 'tencent', fixture.source, { fetchImpl: async () => new Response('wrong bytes') }), /SHA-256 mismatch/);
+  await assert.rejects(readFile(archive), { code: 'ENOENT' });
+});
+
+test('deployment validation always requires all seven images', () => {
   const identity = { id: `sha256:${'a'.repeat(64)}`, tag: 'local', repoDigests: [], platform: 'linux/arm64' };
-  const manifest = { schemaVersion: 1, images: { runtime: { ...identity }, 'cli-proxy-api': { ...identity } } };
-  assert.equal(validateDeploymentImages(manifest, ['runtime', 'cli-proxy-api'], 'linux/arm64'), manifest);
-  assert.throws(() => validateDeploymentImages(manifest, ['runtime', 'core']), /Missing image: core/);
-  assert.throws(() => validateDeploymentImages(manifest, ['runtime'], 'linux/amd64'), /Incompatible image platform/);
-  manifest.images.core = { ...identity, id: 'mutable-tag-only' };
-  assert.throws(() => validateDeploymentImages(manifest, ['runtime']), /Invalid image identity: core/);
+  const manifest = { schemaVersion: 1, images: Object.fromEntries(imageServices.map(name => [name, { ...identity }])) };
+  assert.equal(validateDeploymentImages(manifest, 'linux/arm64'), manifest);
+  assert.throws(() => validateDeploymentImages(manifest, 'linux/amd64'), /Incompatible image platform/);
+  delete manifest.images.panel;
+  assert.throws(() => validateDeploymentImages(manifest), /Missing image: panel/);
 });
 
 test('build context uses installed package resources, not caller files or secrets', async () => {
@@ -51,10 +139,10 @@ test('build context uses installed package resources, not caller files or secret
     await mkdir(resolve(project, 'deploy'));
     await writeFile(resolve(project, 'deploy/node.Dockerfile'), 'caller-controlled Dockerfile');
     const context = await prepareBuildContext(project);
-    assert.match(await readFile(resolve(context, 'deploy/node.Dockerfile'), 'utf8'), /^FROM docker.io\/library\/node:/);
+    assert.match(await readFile(resolve(context, 'deploy/node.Dockerfile'), 'utf8'), /^FROM docker.io\/library\/node:22-bookworm-slim@sha256:/m);
     await assert.rejects(readFile(resolve(context, '.env')), { code: 'ENOENT' });
-    assert.match(await readFile(resolve(context, 'dist/runtime/environment.js'), 'utf8'), /AMS_ENV_FILE/);
-    await assert.rejects(readFile(resolve(context, 'dist/runtime/environment.js.map')), { code: 'ENOENT' });
+    assert.match(await readFile(resolve(context, 'dist/runtime/config.js'), 'utf8'), /readInstallationEnv/);
+    await assert.rejects(readFile(resolve(context, 'dist/runtime/config.js.map')), { code: 'ENOENT' });
     assert.equal(await readFile(resolve(context, 'package.json'), 'utf8'), contextPackageJson);
   } finally { await rm(project, { recursive: true, force: true }); }
 });
@@ -68,26 +156,26 @@ test('damaged image bundle is rejected before contacting the container runtime',
   } finally { await rm(project, { recursive: true, force: true }); }
 });
 
-test('checksum-valid image archive missing a declared content identity is rejected before load', { skip: process.env.AMS_IMAGE_LOAD_TEST !== '1' }, async t => {
-  const directory = await mkdtemp(resolve(tmpdir(), 'ams-bundle-identity-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const runtime = process.env.AMS_CONTAINER_ENGINE ?? 'podman';
-  const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-  await writeFile(resolve(directory, 'config.json'), '{}');
-  await writeFile(resolve(directory, 'manifest.json'), JSON.stringify([{ Config: 'config.json' }]));
-  execFileSync('tar', ['-cf', resolve(directory, 'images.tar'), '-C', directory, 'manifest.json', 'config.json']);
-  const manifest = { schemaVersion: 1, images: { core: { id: `sha256:${'a'.repeat(64)}`, tag: 'synthetic', repoDigests: [], platform: runtimePlatform(runtime) } } };
-  const manifestBytes = JSON.stringify(manifest);
-  await writeFile(resolve(directory, 'images.json'), manifestBytes);
-  await writeFile(resolve(directory, 'bundle.json'), JSON.stringify({ schemaVersion: 1, archiveSha256: sha(await readFile(resolve(directory, 'images.tar'))), manifestSha256: sha(manifestBytes) }));
-  await assert.rejects(loadImages({ bundleDir: directory, projectDir: directory, runtime }), /Archive is missing the configured image: core/);
-  await assert.rejects(readFile(resolve(directory, '.ams/images.json')), { code: 'ENOENT' });
+test('checksum-valid image archive missing a declared content identity is rejected before engine use', async t => {
+  const f = await bundleFixture(t);
+  await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
+  const beforeCalls = await readFile(f.calls, 'utf8');
+  const manifest = JSON.parse(await readFile(resolve(f.output, 'images.json'), 'utf8'));
+  manifest.images.core.id = `sha256:${'f'.repeat(64)}`;
+  const bytes = JSON.stringify(manifest);
+  await writeFile(resolve(f.output, 'images.json'), bytes);
+  const metadata = JSON.parse(await readFile(resolve(f.output, 'bundle.json'), 'utf8'));
+  metadata.manifestSha256 = createHash('sha256').update(bytes).digest('hex');
+  await writeFile(resolve(f.output, 'bundle.json'), JSON.stringify(metadata));
+  await assert.rejects(loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' }), /Archive is missing the configured image: core/);
+  assert.equal(await readFile(f.calls, 'utf8'), beforeCalls);
+  await assert.rejects(readFile(resolve(f.destination, '.ams/pending-images.json')), { code: 'ENOENT' });
 });
 
 test('build fingerprints follow packaged bytes and remain stable across directories, docs, secrets and source maps', async t => {
   const root = await mkdtemp(resolve(tmpdir(), 'ams-fingerprint-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const path of ['deploy', 'dist/runtime', 'dist/config', 'dist/deployment', 'dist/build', 'dist/patches', 'patches', 'upstream.lock.json']) {
+  for (const path of ['deploy', 'dist/runtime', 'dist/config', 'dist/deployment', 'dist/build', 'upstream.lock.json']) {
     await mkdir(resolve(root, path, '..'), { recursive: true });
     await cp(resolve(packageRoot, path), resolve(root, path), { recursive: true });
   }
@@ -96,14 +184,14 @@ test('build fingerprints follow packaged bytes and remain stable across director
   await writeFile(resolve(root, '.env'), 'LLM_API_KEY=synthetic-secret');
   await writeFile(resolve(root, 'README.md'), 'Different documentation');
   await writeFile(resolve(root, 'package.json'), '{"version":"999.0.0"}');
-  await writeFile(resolve(root, 'dist/runtime/environment.js.map'), 'different machine source map');
+  await writeFile(resolve(root, 'dist/runtime/config.js.map'), 'different machine source map');
   for (const service of imageServices) assert.equal(hashes[service], await buildFingerprint(service, root), service);
   const config = resolve(root, 'dist/config/settings.js');
   await writeFile(config, (await readFile(config, 'utf8')) + '\n// newly supported env field\n');
   assert.notEqual(hashes.runtime, await buildFingerprint('runtime', root));
   assert.equal(hashes.core, await buildFingerprint('core', root));
-  const patch = resolve(root, 'patches/ams-access.ts');
-  await writeFile(patch, (await readFile(patch, 'utf8')) + '\n// new upstream adaptation\n');
+  const recipe = resolve(root, 'deploy/node.Dockerfile');
+  await writeFile(recipe, (await readFile(recipe, 'utf8')) + '\n# Updated stock build recipe\n');
   assert.notEqual(hashes['memory-proxy'], await buildFingerprint('memory-proxy', root));
   assert.equal(hashes['cli-proxy-api'], await buildFingerprint('cli-proxy-api', root));
   const lock = resolve(root, 'upstream.lock.json');
@@ -111,7 +199,7 @@ test('build fingerprints follow packaged bytes and remain stable across director
   assert.notEqual(hashes['cli-proxy-api'], await buildFingerprint('cli-proxy-api', root));
 });
 
-test('installation TDAI pins change only the four TDAI image fingerprints', async t => {
+test('installation TDAI pins change the four services and stock MCP fingerprints', async t => {
   const first = await mkdtemp(resolve(tmpdir(), 'ams-first-source-'));
   const second = await mkdtemp(resolve(tmpdir(), 'ams-second-source-'));
   t.after(() => Promise.all([first, second].map(path => rm(path, { recursive: true, force: true }))));
@@ -127,7 +215,7 @@ test('installation TDAI pins change only the four TDAI image fingerprints', asyn
   }
   for (const service of imageServices) {
     const hashes = await Promise.all([first, second].map(directory => buildFingerprint(service, undefined, directory)));
-    if (['core', 'knowledge', 'panel', 'memory-proxy'].includes(service)) assert.notEqual(hashes[0], hashes[1], service);
+    if (['core', 'knowledge', 'panel', 'memory-proxy', 'mcp'].includes(service)) assert.notEqual(hashes[0], hashes[1], service);
     else {
       assert.equal(hashes[0], hashes[1], service);
       assert.equal(hashes[0], await buildFingerprint(service), service);
@@ -135,7 +223,7 @@ test('installation TDAI pins change only the four TDAI image fingerprints', asyn
   }
 });
 
-async function bundleFixture(t, { pinned = true, service = 'core', services = [service] } = {}) {
+async function bundleFixture(t, { services = imageServices, revisionOverrides = {} } = {}) {
   const root = await mkdtemp(resolve(tmpdir(), 'ams-source-bundle-'));
   const originalPath = process.env.PATH;
   t.after(async () => { process.env.PATH = originalPath; await rm(root, { recursive: true, force: true }); });
@@ -146,16 +234,15 @@ async function bundleFixture(t, { pinned = true, service = 'core', services = [s
   await mkdir(resolve(project, '.ams'), { recursive: true });
   await mkdir(resolve(destination, '.ams'), { recursive: true });
   await mkdir(bin);
-  const source = pinned ? { revision: 'a'.repeat(40), sha256: 'b'.repeat(64),
-    url: `https://codeload.github.com/TencentCloud/TencentDB-Agent-Memory/tar.gz/${'a'.repeat(40)}` }
-    : (await loadSourceLock()).sources.tencent;
-  if (pinned) await writeFile(resolve(project, '.ams/tdai-source.json'), JSON.stringify(source));
+  const fixture = await installNativeSourceFixture(project);
+  const { source, bytes, files } = fixture;
+  const templates = await getNativeTemplates(project, source);
   const manifest = { schemaVersion: 1, images: {} };
   const inspections = {};
   const entries = [];
   for (const selected of services) {
     const fingerprint = await buildFingerprint(selected, undefined, project);
-    const config = { config: { Labels: { 'org.opencontainers.image.revision': source.revision, [buildFingerprintLabel]: fingerprint } } };
+    const config = { config: { Labels: { 'org.opencontainers.image.revision': revisionOverrides[selected] ?? source.revision, [buildFingerprintLabel]: fingerprint } } };
     const configBytes = JSON.stringify(config);
     const id = `sha256:${createHash('sha256').update(configBytes).digest('hex')}`;
     manifest.images[selected] = { id, tag: `test-${selected}`, repoDigests: [], platform: 'linux/arm64' };
@@ -181,26 +268,79 @@ else if(args[0]!=='load')process.exitCode=1;
   await writeFile(resolve(bin, 'docker'), fakeEngine);
   await chmod(resolve(bin, 'docker'), 0o755);
   process.env.PATH = `${bin}:${originalPath}`;
-  return { root, project, destination, output, source, manifest, inspection, inspections, calls };
+  return { root, project, destination, output, source, manifest, inspection, inspections, calls, templates, bytes, files };
 }
 
-test('export/load retains installation TDAI source and reuses imported images offline', async t => {
+test('export/load stages TDAI source and images for offline apply without replacing active state', async t => {
   const f = await bundleFixture(t);
   const previous = (await loadSourceLock()).sources.tencent;
   await writeFile(resolve(f.destination, '.ams/tdai-source.json'), JSON.stringify(previous));
   await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
   assert.deepEqual(JSON.parse(await readFile(resolve(f.output, 'tdai-source.json'), 'utf8')), f.source);
+  assert.deepEqual(await readFile(resolve(f.output, 'tdai-source.tar.gz')), f.bytes);
+  await assert.rejects(readFile(resolve(f.output, 'native-templates/manifest.json')), { code: 'ENOENT' });
+  t.mock.method(globalThis, 'fetch', async () => assert.fail('Offline import/apply cannot download sources'));
   await loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' });
-  assert.equal((await loadSourceLock(f.destination)).sources.tencent.revision, f.source.revision);
-  assert.equal((await loadSourceLock(f.destination)).sources.tencent.sha256, f.source.sha256);
-  const before = JSON.parse(await readFile(resolve(f.destination, '.ams/before-save.json'), 'utf8'));
-  assert.equal(JSON.parse(before['.ams/tdai-source.json']).revision, previous.revision);
-  const prepared = await prepareImages({ projectDir: f.destination, runtime: 'docker', services: ['core'] }, {
+  assert.deepEqual((await loadSourceLock(f.destination)).sources.tencent, previous);
+  assert.deepEqual(await getNativeTemplates(f.destination, f.source), f.templates);
+  assert.deepEqual(JSON.parse(await readFile(resolve(f.destination, '.ams/pending-tdai-source.json'), 'utf8')), f.source);
+  assert.deepEqual(JSON.parse(await readFile(resolve(f.destination, '.ams/pending-images.json'), 'utf8')), f.manifest);
+  await assert.rejects(readFile(resolve(f.destination, '.ams/images.json')), { code: 'ENOENT' });
+  await assert.rejects(readFile(resolve(f.destination, '.ams/before-save.json')), { code: 'ENOENT' });
+  const prepared = await prepareImages({ projectDir: f.destination, runtime: 'docker' }, {
     run: async command => command.args[0] === 'info'
-      ? JSON.stringify({ OSType: 'linux', Architecture: 'arm64' }) : JSON.stringify([f.inspection]),
+      ? JSON.stringify({ OSType: 'linux', Architecture: 'arm64' }) : JSON.stringify([f.inspections[command.args[2]]]),
     build: async () => assert.fail('Imported matching source must not trigger a rebuild or network fetch'),
   });
   assert.deepEqual(prepared, f.manifest);
+  const nativeRoot = resolve(f.root, 'native');
+  const candidate = await prepareNativeConfiguration(f.destination, {}, { root: nativeRoot, source: f.source });
+  await saveNativeConfiguration(f.destination, candidate);
+  assert.deepEqual((await readdir(resolve(nativeRoot, 'defaults'))).sort(), Object.keys(f.files).sort());
+  for (const [name, text] of Object.entries(f.files)) assert.equal(await readFile(resolve(nativeRoot, 'defaults', name), 'utf8'), text);
+  await assert.rejects(readdir(resolve(f.destination, '.ams/native-templates')), { code: 'ENOENT' });
+});
+
+test('save-only Configure selects imported source only for a fresh installation', async t => {
+  for (const baseline of ['fresh', 'active-pin', 'native-and-pin']) {
+    await t.test(baseline, async t => {
+      const f = await bundleFixture(t);
+      const nativeRoot = resolve(f.root, 'native');
+      const previous = createNativeSourceFixture({ revision: 'b'.repeat(40), files: { 'core.yaml': 'futureOption: existing-default\n' } });
+      if (baseline !== 'fresh') {
+        await installNativeSourceFixture(f.destination, previous);
+        if (baseline !== 'active-pin') {
+          const candidate = await prepareNativeConfiguration(f.destination, {}, { root: nativeRoot });
+          await saveNativeConfiguration(f.destination, candidate);
+        }
+      }
+      await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
+      await loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' });
+      t.mock.method(globalThis, 'fetch', async () => assert.fail('Offline Configure cannot download or discover models'));
+      const engineCalls = await readFile(f.calls, 'utf8');
+      const ui = {
+        async select(_id, _message, options, initial) { return initial ?? options[0].value; },
+        async text(question) { return question.initial ?? 'configured-model'; },
+        async confirm(id, _message, initial) { return id === 'apply' ? false : initial; },
+        note() {}, async handoff() { assert.fail('Configure cannot initialize Core'); },
+      };
+      await setupServer(ui, { directory: f.destination, nativeRoot,
+        runtime: () => assert.fail('Save-only Configure cannot use an engine'),
+        prepareImages: async () => assert.fail('Save-only Configure cannot build images'),
+        listModels: async () => assert.fail('Local models need no provider discovery'),
+      });
+      const expected = baseline === 'fresh' ? f : previous;
+      assert.deepEqual(validateTdaiSource((await loadSourceLock(f.destination)).sources.tencent), expected.source);
+      for (const [name, text] of Object.entries(expected.files)) {
+        assert.equal(await readFile(resolve(nativeRoot, 'defaults', name), 'utf8'), text, name);
+      }
+      assert.deepEqual((await readdir(resolve(nativeRoot, 'defaults'))).sort(), Object.keys(expected.files).sort());
+      assert.deepEqual(JSON.parse(await readFile(resolve(f.destination, '.ams/pending-tdai-source.json'), 'utf8')), f.source);
+      assert.deepEqual(JSON.parse(await readFile(resolve(f.destination, '.ams/pending-images.json'), 'utf8')), f.manifest);
+      assert.equal(await readFile(f.calls, 'utf8'), engineCalls);
+      await assert.rejects(readFile(resolve(f.destination, '.ams/images.json')), { code: 'ENOENT' });
+    });
+  }
 });
 
 test('bundle source corruption or invalid source metadata fails before engine use and preserves destination', async t => {
@@ -235,25 +375,24 @@ test('source metadata must match archived image revision before load', async t =
   await assert.rejects(readFile(resolve(f.destination, '.ams/tdai-source.json')), { code: 'ENOENT' });
 });
 
-test('legacy bundle without source metadata accepts only a verified packaged revision', async t => {
-  for (const pinned of [true, false]) {
-    await t.test(pinned ? 'unknown updated source is rejected' : 'packaged source is restored', async t => {
-      const f = await bundleFixture(t, { pinned });
-      await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
-      const metadataPath = resolve(f.output, 'bundle.json');
-      const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
-      delete metadata.tdaiSourceSha256;
-      await writeFile(metadataPath, JSON.stringify(metadata));
-      await rm(resolve(f.output, 'tdai-source.json'));
-      if (pinned) {
-        await assert.rejects(loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' }), /source selection does not match bundled image/);
-        assert.ok(!(await readFile(f.calls, 'utf8')).includes('["load"'));
-      } else {
-        await loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' });
-        assert.equal((await loadSourceLock(f.destination)).sources.tencent.revision, f.source.revision);
-      }
-    });
-  }
+test('TDAI bundle requires explicit source metadata before engine use', async t => {
+  const f = await bundleFixture(t);
+  await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
+  const metadataPath = resolve(f.output, 'bundle.json');
+  const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+  delete metadata.tdaiSourceSha256;
+  await writeFile(metadataPath, JSON.stringify(metadata));
+  await rm(resolve(f.output, 'tdai-source.json'));
+  const beforeCalls = await readFile(f.calls, 'utf8');
+  await assert.rejects(loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' }), /requires source metadata/);
+  assert.equal(await readFile(f.calls, 'utf8'), beforeCalls);
+  await assert.rejects(readFile(resolve(f.destination, '.ams/pending-tdai-source.json')), { code: 'ENOENT' });
+});
+
+test('export verifies the stock MCP artifact revision before saving images', async t => {
+  const f = await bundleFixture(t, { revisionOverrides: { mcp: 'b'.repeat(40) } });
+  await assert.rejects(exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' }), /source selection does not match bundled image: mcp/);
+  assert.ok(!(await readFile(f.calls, 'utf8')).includes('["save"'));
 });
 
 test('export rejects a source changed after the recorded images were built', async t => {
@@ -264,47 +403,62 @@ test('export rejects a source changed after the recorded images were built', asy
   assert.ok(!(await readFile(f.calls, 'utf8')).includes('["save"'));
 });
 
-test('bundle without TDAI images retains destination source selection', async t => {
-  const f = await bundleFixture(t, { service: 'runtime' });
-  const bytes = JSON.stringify(f.source);
-  await writeFile(resolve(f.destination, '.ams/tdai-source.json'), bytes);
-  await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
-  assert.equal(JSON.parse(await readFile(resolve(f.output, 'bundle.json'), 'utf8')).tdaiSourceSha256, undefined);
-  await loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' });
-  assert.equal(await readFile(resolve(f.destination, '.ams/tdai-source.json'), 'utf8'), bytes);
-});
-
-test('configured export excludes stale inactive images while retaining helper runtime and TDAI pin', async t => {
-  const f = await bundleFixture(t, { services: ['core', 'runtime'] });
-  const saved = structuredClone(f.manifest);
-  const stalePanel = `sha256:${'c'.repeat(64)}`;
-  saved.images.panel = { id: stalePanel, tag: 'old-panel', repoDigests: [], platform: 'linux/amd64' };
-  const original = JSON.stringify(saved);
-  await writeFile(resolve(f.project, '.ams/images.json'), original);
-  await writeFile(resolve(f.project, '.env'), 'AMS_DEPLOYMENT_VERSION=1\nAMS_SERVICES=core\n');
-  await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
-  assert.deepEqual(JSON.parse(await readFile(resolve(f.output, 'images.json'), 'utf8')), f.manifest);
-  assert.equal(await readFile(resolve(f.project, '.ams/images.json'), 'utf8'), original);
-  assert.ok(!(await readFile(f.calls, 'utf8')).includes(stalePanel), 'inactive image is neither inspected nor saved');
-  assert.deepEqual(JSON.parse(await readFile(resolve(f.output, 'tdai-source.json'), 'utf8')), f.source);
-  const loaded = await loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' });
-  const prepared = await prepareImages({ projectDir: f.destination, runtime: 'docker', services: ['core', 'runtime'] }, {
-    run: async command => command.args[0] === 'info'
-      ? JSON.stringify({ OSType: 'linux', Architecture: 'arm64' }) : JSON.stringify([f.inspections[command.args[2]]]),
-    build: async () => assert.fail('Selected imported images must remain reusable offline'),
-  });
-  assert.deepEqual(prepared, loaded);
-  assert.deepEqual(Object.keys(loaded.images), ['core', 'runtime']);
-});
-
-test('configured export requires helper images and rejects invalid topology before engine calls', async t => {
-  const f = await bundleFixture(t);
-  for (const [env, message] of [
-    ['AMS_DEPLOYMENT_VERSION=1\nAMS_SERVICES=core\n', /Missing image: runtime/],
-    ['AMS_DEPLOYMENT_VERSION=1\nAMS_SERVICES=unknown\n', /unknown or duplicate service names/],
-  ]) {
-    await writeFile(resolve(f.project, '.env'), env);
-    await assert.rejects(exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' }), message);
+test('export rejects incomplete stacks before contacting the engine', async t => {
+  for (const missing of imageServices) await t.test(missing, async t => {
+    const f = await bundleFixture(t, { services: imageServices.filter(name => name !== missing) });
+    await assert.rejects(exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' }), new RegExp(`Missing image: ${missing}`));
     await assert.rejects(readFile(f.calls), { code: 'ENOENT' });
+  });
+});
+
+test('import rejects a checksum-valid incomplete manifest before contacting the engine', async t => {
+  const f = await bundleFixture(t);
+  await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
+  const before = await readFile(f.calls, 'utf8');
+  const manifest = structuredClone(f.manifest);
+  delete manifest.images.panel;
+  const bytes = JSON.stringify(manifest);
+  await writeFile(resolve(f.output, 'images.json'), bytes);
+  const metadata = JSON.parse(await readFile(resolve(f.output, 'bundle.json'), 'utf8'));
+  metadata.manifestSha256 = createHash('sha256').update(bytes).digest('hex');
+  await writeFile(resolve(f.output, 'bundle.json'), JSON.stringify(metadata));
+  await assert.rejects(loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' }), /Missing image: panel/);
+  assert.equal(await readFile(f.calls, 'utf8'), before);
+});
+
+test('checksum-valid source missing a native default is rejected before engine load', async t => {
+  const f = await bundleFixture(t);
+  await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
+  const beforeCalls = await readFile(f.calls, 'utf8');
+  const incomplete = createNativeSourceFixture({ files: { 'proxy.yaml': undefined } });
+  await writeFile(resolve(f.output, 'tdai-source.tar.gz'), incomplete.bytes);
+  const sourceBytes = JSON.stringify(incomplete.source);
+  await writeFile(resolve(f.output, 'tdai-source.json'), sourceBytes);
+  const metadataPath = resolve(f.output, 'bundle.json');
+  const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+  metadata.tdaiSourceSha256 = createHash('sha256').update(sourceBytes).digest('hex');
+  await writeFile(metadataPath, JSON.stringify(metadata));
+  await assert.rejects(loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' }), /Missing or duplicate native template/);
+  assert.equal(await readFile(f.calls, 'utf8'), beforeCalls);
+  await assert.rejects(readFile(resolve(f.destination, '.ams/pending-tdai-source.json')), { code: 'ENOENT' });
+});
+
+test('corrupt or missing bundled source is rejected even with a matching local archive', async t => {
+  for (const damage of ['corrupt', 'missing', 'wrong-provenance']) {
+    await t.test(damage, async t => {
+      const f = await bundleFixture(t);
+      await exportImages({ projectDir: f.project, outputDir: f.output, runtime: 'docker' });
+      await cacheSourceArchive(f.destination, 'tencent', f.source, f.bytes);
+      const beforeCalls = await readFile(f.calls, 'utf8');
+      const archive = resolve(f.output, 'tdai-source.tar.gz');
+      if (damage === 'missing') await rm(archive);
+      else await writeFile(archive, damage === 'corrupt' ? 'corrupt archive' : createNativeSourceFixture({ revision: 'b'.repeat(40) }).bytes);
+      t.mock.method(globalThis, 'fetch', async () => assert.fail('Offline bundle import must never fetch sources'));
+      await assert.rejects(loadImages({ bundleDir: f.output, projectDir: f.destination, runtime: 'docker' }), /SHA-256 mismatch|ENOENT/);
+      assert.equal(await readFile(f.calls, 'utf8'), beforeCalls);
+      for (const name of ['tdai-source.json', 'images.json', 'pending-tdai-source.json', 'pending-images.json']) {
+        await assert.rejects(readFile(resolve(f.destination, '.ams', name)), { code: 'ENOENT' });
+      }
+    });
   }
 });

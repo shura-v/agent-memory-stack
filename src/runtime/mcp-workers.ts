@@ -1,7 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AccessError } from './user-auth.js';
@@ -81,19 +80,19 @@ async function stopGroup(child: ChildProcess): Promise<void> {
   await delay(200);
   signal('SIGKILL');
 }
-export function supergatewayFactory(knowledgeToolsUrl: string, serviceId: string): WorkerFactory {
+export function supergatewayFactory(knowledgeToolsUrl: string, stockServer = '/opt/knowledge/dist/mcp/server.mjs'): WorkerFactory {
   const require = createRequire(import.meta.url);
   const executable = join(dirname(require.resolve('supergateway/package.json')), 'dist/index.js');
-  const adapter = fileURLToPath(new URL('./mcp-adapter.js', import.meta.url));
   // The shell command consists only of packaged paths. The credential is never an argument.
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
   return async key => {
     const port = await freePort();
-    const child = spawn(process.execPath, [executable, '--stdio', `${quote(process.execPath)} ${quote(adapter)}`,
+    // exec replaces Supergateway's shell so session expiry kills the stock process itself.
+    const child = spawn(process.execPath, [executable, '--stdio', `exec ${quote(process.execPath)} ${quote(stockServer)}`,
       '--outputTransport', 'streamableHttp', '--stateful', '--streamableHttpPath', '/mcp', '--port', String(port),
       '--sessionTimeout', '300000', '--healthEndpoint', '/health', '--logLevel', 'none'], {
       detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, NODE_ENV: 'production',
-        AMS_MCP_USER_KEY: key, AMS_MCP_KNOWLEDGE_URL: knowledgeToolsUrl, AMS_MCP_SERVICE_ID: serviceId },
+        KNOWLEDGE_API_TOKEN: key, KNOWLEDGE_API_URL: knowledgeToolsUrl, LOG_LEVEL: 'error' },
     });
     let dead = false;
     let stopped: Promise<void> | undefined;

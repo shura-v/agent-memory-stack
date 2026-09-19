@@ -1,5 +1,8 @@
 import type { IncomingMessage } from 'node:http';
-import { serviceEndpoint } from './service-identity.js';
+/** Build URLs for the stock Core API without adding an AMS service protocol. */
+export function serviceEndpoint(base: string, route: string): string {
+  return base.replace(/\/+$/, '') + '/' + route.replace(/^\/+/, '');
+}
 
 export type JsonObject = Record<string, unknown>;
 export class AccessError extends Error {

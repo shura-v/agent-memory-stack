@@ -11,34 +11,43 @@ const image = (service: keyof typeof imageVariables) => '${' + imageVariables[se
 const data = (directory: string) => '${DATA_DIR}/' + directory + ':/data';
 
 /** Keep human-readable Compose output without anchors or aliases. */
-export function composeDocument(settings: Record<string, string>): { services: Record<string, ServiceDefinition>; networks: Record<string, unknown> } {
+export function composeDocument(settings: Record<string, string>, native?: { generation: string; root: string }): { services: Record<string, ServiceDefinition>; networks: Record<string, unknown> } {
   const plan = resolveDeployment(settings);
+  if (native && !/^[a-f0-9-]{36}$/.test(native.generation)) throw new Error('Invalid native generation');
+  const configDirectory = native ? `./.ams/generations/${native.generation}` : './generated';
+  const files: Record<string, string[]> = {
+    core: ['core.yaml'], knowledge: ['knowledge.env'],
+    panel: ['panel.env', 'panel-instances.json'], 'memory-proxy': ['proxy.yaml'],
+    mcp: ['mcp.json'], 'cli-proxy-api': ['cli-proxy-api.yaml'], bootstrap: ['bootstrap-env.json'],
+    access: ['access-env.json'],
+  };
+  const mounts = (service: string) => files[service].map(name => `${configDirectory}/${name}:${name === 'knowledge.env' || name === 'panel.env' ? '/app/.env' : `/config/${name}`}:ro`);
   const services: Record<string, ServiceDefinition> = {};
   services.config = { image: image('runtime'), user: '0:0', command: ['runtime/config.js', 'generate', '/state'], environment: { AMS_DATA_ROOT: '/data', AMS_SERVICE_UID: '10001' }, volumes: ['./:/state', '${DATA_DIR}:/data'], network_mode: 'none', restart: 'no' };
   for (const name of plan.services) {
-    const item: ServiceDefinition = { ...common(), image: image(name), volumes: ['./generated:/config:ro', data(name === 'memory-proxy' ? 'proxy' : name)] };
-    if (name === 'mcp') item.volumes = ['./generated:/config:ro'];
+    const item: ServiceDefinition = { ...common(), image: image(name), volumes: [...mounts(name), data(name === 'memory-proxy' ? 'proxy' : name)] };
+    if (name === 'mcp') item.volumes = mounts(name);
+    if (name === 'core') item.environment = { TDAI_GATEWAY_CONFIG: '/config/core.yaml' };
+    if (native) item.labels = { 'io.agent-memory-stack.native-config': native.root };
     if (ports[name]) item.healthcheck = health(ports[name]!);
     services[name] = item;
   }
-  if (plan.helpers.includes('bootstrap')) services.bootstrap = { image: image('runtime'), user: '0:0', command: ['--import', '/app/runtime/environment.js', 'runtime/bootstrap.js', 'check'], environment: { AMS_ENV_FILE: '/config/bootstrap-env.json' }, volumes: ['./generated:/config:ro'], networks: ['stack'], restart: 'no' };
-  if (plan.helpers.includes('access')) services.access = { ...common(), image: image('runtime'), command: ['--import', '/app/runtime/environment.js', 'runtime/access-gateway.js'], environment: { AMS_ENV_FILE: '/config/access-env.json' }, volumes: ['./generated:/config:ro'], healthcheck: health(8080) };
-  if (plan.helpers.includes('knowledge-service')) services['knowledge-service'] = { ...common(), image: image('runtime'), command: ['runtime/knowledge-service.js', '/config/knowledge-service.json'], volumes: ['./generated:/config:ro', data('knowledge')], healthcheck: health(8423) };
+  services.bootstrap = { image: image('runtime'), user: '0:0', command: ['--import', '/app/runtime/environment.js', 'runtime/bootstrap.js', 'check'], environment: { AMS_ENV_FILE: '/config/bootstrap-env.json' }, volumes: mounts('bootstrap'), networks: ['stack'], restart: 'no' };
+  services.access = { ...common(), image: image('runtime'), command: ['--import', '/app/runtime/environment.js', 'runtime/access-gateway.js'], environment: { AMS_ENV_FILE: '/config/access-env.json' }, volumes: mounts('access'), healthcheck: health(8080) };
   for (const name of Object.keys(services)) {
     if (name === 'config') continue;
     const dependencies: Record<string, { condition: string }> = { config: { condition: 'service_completed_successfully' } };
     for (const dependency of plan.readiness.find(edge => edge.service === name)?.dependsOn ?? []) {
-      if (services[dependency]) dependencies[dependency] = { condition: dependency === 'bootstrap' ? 'service_completed_successfully' : dependency === 'cli-proxy-api' ? 'service_started' : 'service_healthy' };
+      dependencies[dependency] = { condition: dependency === 'bootstrap' ? 'service_completed_successfully' : dependency === 'cli-proxy-api' ? 'service_started' : 'service_healthy' };
     }
     if (name === 'bootstrap') dependencies.core = { condition: 'service_healthy' };
-    if (name === 'access' || name === 'knowledge-service') dependencies.knowledge = { condition: 'service_healthy' };
+    if (name === 'access') dependencies.knowledge = { condition: 'service_healthy' };
     services[name].depends_on = dependencies;
   }
   for (const binding of plan.interfaces) {
-    if (!services[binding.service]) throw new Error(`Cannot publish absent service: ${binding.service}`);
     const bindings = services[binding.service].ports as string[] | undefined;
     services[binding.service].ports = [...(bindings ?? []), `127.0.0.1:${binding.port}:${binding.target}`];
   }
   return { services, networks: { stack: {} } };
 }
-export function renderCompose(settings: Record<string, string>): string { return stringify(composeDocument(settings), { schema: 'core', compat: 'yaml-1.1', aliasDuplicateObjects: false, lineWidth: 0, indent: 2 }); }
+export function renderCompose(settings: Record<string, string>, native?: { generation: string; root: string }): string { return stringify(composeDocument(settings, native), { schema: 'core', compat: 'yaml-1.1', aliasDuplicateObjects: false, lineWidth: 0, indent: 2 }); }

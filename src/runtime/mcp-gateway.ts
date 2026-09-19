@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { AccessError, isObject, requireSingleHeaders, bearerKey, userAuthorizer } from './user-auth.js';
-import { fetchIdentity, serviceEndpoint } from './service-identity.js';
+import { serviceEndpoint } from './user-auth.js';
 import { InitializeRequestSchema, JSONRPCRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { McpWorkers, supergatewayFactory, type McpWorker } from './mcp-workers.js';
 
@@ -135,7 +135,7 @@ export function createMcpGateway(config: McpGatewayConfig, options: { fetcher?: 
   if (!config.coreApiKey || config.serviceId !== 'ams' || !Number.isInteger(config.port) || config.port < 1 || config.port > 65535) throw new Error('Invalid MCP configuration');
   serviceEndpoint(config.coreUrl, '/health'); serviceEndpoint(config.knowledgeToolsUrl, '/health');
   const fetcher = options.fetcher ?? fetch;
-  const workers = options.workers ?? new McpWorkers(supergatewayFactory(config.knowledgeToolsUrl, config.serviceId));
+  const workers = options.workers ?? new McpWorkers(supergatewayFactory(config.knowledgeToolsUrl));
   const auth = userAuthorizer(config, fetcher);
   const server = http.createServer(async (req, res) => {
     let release: (() => void) | undefined;
@@ -149,8 +149,6 @@ export function createMcpGateway(config: McpGatewayConfig, options: { fetcher?: 
       if (session && payload?.initialize) throw new AccessError(400, 'Session already initialized');
       if (req.method !== 'POST' && (req.headers['transfer-encoding'] || Number(req.headers['content-length']) > 0)) throw new AccessError(400, 'Unexpected request body');
       const userId = await auth.authenticate(key);
-      const [core, knowledge] = await Promise.all([fetchIdentity(config.coreUrl, config.coreApiKey, fetcher), fetchIdentity(config.knowledgeToolsUrl, config.coreApiKey, fetcher)]);
-      if (core.knowledgeId || core.panelId || knowledge.coreId !== core.coreId || !knowledge.knowledgeId || knowledge.panelId) throw new AccessError(503, 'Knowledge integration unavailable');
       const context = createHash('sha256').update(JSON.stringify([userId, key])).digest('hex');
       const lease = await workers.acquire(context, key); release = lease.release;
       if (req.aborted || res.destroyed) return;
@@ -165,7 +163,7 @@ export function createMcpGateway(config: McpGatewayConfig, options: { fetcher?: 
       if (!session) worker.pending++;
       try {
         const initialized = await forward(req, res, worker, payload?.bytes, session);
-        // A failed initialization may leave an adapter behind. Reap only an otherwise
+        // A failed initialization may leave a stdio child behind. Reap only an otherwise
         // unused worker: other sessions and concurrent initializations share this process.
         if (!session && !initialized && worker.sessions.size === 0 && worker.pending === 1) await lease.discard();
       }
@@ -182,7 +180,7 @@ export function createMcpGateway(config: McpGatewayConfig, options: { fetcher?: 
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = JSON.parse(await readFile(process.argv[2] || '/config/mcp.json', 'utf8')) as McpGatewayConfig;
-  const workers = new McpWorkers(supergatewayFactory(config.knowledgeToolsUrl, config.serviceId));
+  const workers = new McpWorkers(supergatewayFactory(config.knowledgeToolsUrl));
   const server = createMcpGateway(config, { workers });
   server.listen(config.port, '0.0.0.0');
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {

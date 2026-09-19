@@ -27,12 +27,12 @@ ams update tdai      Update TDAI and apply saved configuration
 
 Setup saves configuration before asking "Apply configuration now?".
 No keeps it saved for later; Yes applies it immediately.
-Configuration lives in ~/.agent-memory-stack for this OS user.
+Runtime files live in ~/.agent-memory-stack; native TDAI configuration defaults to ~/.config/agent-memory-stack.
 Apply and update use this fixed directory from any working directory.
 Update downloads the latest TDAI feat/server_team revision.
 Initial setup generates the administrator key. Core stores it; AMS saves no separate copy.
 Choose Show connection details in the menu for saved ports and all configured keys.
-Configure stack checks existing containers; edit .env and run ams apply.
+Configure stack checks existing containers; inspect native defaults/, edit overrides/ or orchestration .env and run ams apply.
 
 Requires Node.js 24+. Server apply requires Docker/Podman with Compose.
 Missing server images are built automatically from pinned sources.`;
@@ -69,6 +69,7 @@ export async function executeCommand(command: Exclude<Command, { action: 'help' 
         const existing = await (options.detectInstallation ?? detectExistingInstallation)();
         if (existing) {
           questions.note('The stack’s containers already exist.\n'
+            + (existing.nativeRoot ? `Inspect upstream templates in ${displayHomePath(join(existing.nativeRoot, 'defaults'))}.\nEdit installation settings in ${displayHomePath(join(existing.nativeRoot, 'overrides'))}.\n` : 'Use the installation’s saved native configuration reference to inspect defaults/ and edit overrides/.\n')
             + (existing.directory ? `Edit ${displayHomePath(join(existing.directory, '.env'))} to change configuration.` : 'Edit the existing Compose project’s .env to change configuration.')
             + (existing.directory && resolve(existing.directory) === directory
               ? '\nApply saved changes with: ams apply'

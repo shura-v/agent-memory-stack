@@ -42,9 +42,8 @@
     "THIRD_PARTY_NOTICES.md",
     "README.md",
     "docs/updating-tdai.md",
+    "docs/native-configs.md",
     "DEFAULTS-AUDIT.md",
-    "patches/ams-access.ts",
-    "patches/ams-features.tsx",
     "VALIDATION.md"
   ]
 }
