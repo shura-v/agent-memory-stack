@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { captureNativeConfiguration } from '../config/native-state.js';
+import { captureNativeConfiguration, readNativeConfiguration } from '../config/native-state.js';
 import { atomicWrite } from '../config/files.js';
 
 const inputPaths = ['.env', '.ams/runtime.json', '.ams/tdai-source.json', '.ams/images.json', '.ams/native-config.json', '.ams/native-runtime.json', '.ams/native-backup.json'] as const;
@@ -19,16 +19,21 @@ async function readInput(path: string): Promise<string | null> {
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
 }
 
-export async function captureInputs(directory: string): Promise<Inputs> {
-  const native = await captureNativeConfiguration(directory);
-  return Object.fromEntries(await Promise.all(inputPaths.map(async path => [path, path === '.ams/native-backup.json' ? native : await readInput(join(directory, path))]))) as Inputs;
+export async function captureInputs(directory: string, nativeRoot?: string): Promise<Inputs> {
+  const native = await captureNativeConfiguration(directory, nativeRoot);
+  const inputs = Object.fromEntries(await Promise.all(inputPaths.map(async path => [path, path === '.ams/native-backup.json' ? native : await readInput(join(directory, path))]))) as Inputs;
+  if (native && inputs['.ams/native-config.json'] === null) {
+    const configuration = await readNativeConfiguration(directory, nativeRoot);
+    inputs['.ams/native-config.json'] = JSON.stringify({ version: 1, root: configuration!.root, originsFinalized: configuration!.originsFinalized }, null, 2) + '\n';
+  }
+  return inputs;
 }
 
 /** Preserve editable inputs without reading generated files owned by service UID 10001. */
-export async function preserveInputs(directory: string): Promise<void> {
+export async function preserveInputs(directory: string, nativeRoot?: string): Promise<void> {
   const path = join(directory, '.ams/before-save.json');
   if (await exists(path)) return;
-  const contents = JSON.stringify(await captureInputs(directory));
+  const contents = JSON.stringify(await captureInputs(directory, nativeRoot));
   await mkdir(join(directory, '.ams'), { recursive: true, mode: 0o700 });
   await atomicWrite(path, contents + '\n');
 }

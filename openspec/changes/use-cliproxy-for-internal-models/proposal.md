@@ -1,3 +1,5 @@
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## Why
 
 Core and Knowledge can already call the local CLIProxyAPI through explicit API settings, but setup presents internal processing as a separate external provider and asks for models before local account authorization. Make the shared-provider path an explicit default for fresh full-stack installations and explain both supported routes in documentation and diagrams.

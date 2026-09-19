@@ -14,5 +14,5 @@ export function cliProxyConfig(env: Record<string, string>) {
 /** AMS MCP connections derived independently of native service generation. */
 export function mcpConfig(env: Record<string, string>) {
   const { core, knowledgeTools } = resolveDeployment(env).connections;
-  return { port: 8425, coreUrl: core.endpoint, coreApiKey: core.key, knowledgeToolsUrl: knowledgeTools.endpoint, serviceId };
+  return { port: 8425, coreUrl: core.endpoint, coreApiKey: core.key ?? '', knowledgeToolsUrl: knowledgeTools.endpoint, serviceId };
 }

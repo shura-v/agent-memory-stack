@@ -23,20 +23,28 @@ KNOWLEDGE_TOOLS_PUBLIC_ENABLED="false"
 
 Core, CLIProxyAPI, and the direct Knowledge interfaces communicate inside Compose. Panel, MemoryProxy, and MCP bind to **`127.0.0.1`** by default. You choose which services to publish through Caddy and configure your host/VPS firewall yourself; AMS does not change it. This example publishes all three sites on Caddy's TCP ports **80 and 443**. UDP 443 is optional for HTTP/3. Omit a site block to leave that service accessible only locally or through your own tunnel.
 
-**Knowledge via MCP:** upstream TDAI can inject `curl` instructions for Knowledge HTTP tools into model requests. With `KNOWLEDGE_TOOLS_PUBLIC_ENABLED="false"`, AMS disables those Knowledge instructions; connect the agent to MCP separately to use Wiki and CodeGraph tools. MemoryProxy alone does not register MCP. Memory and skill bridge instructions still use the MemoryProxy domain. For the optional direct Knowledge HTTP mode, see [Setup and operations](operations.md#knowledge-mcp).
+**Knowledge via MCP:** connect the agent to MCP separately to use Wiki and CodeGraph tools. MemoryProxy alone does not register MCP. `KNOWLEDGE_TOOLS_PUBLIC_ENABLED="false"` keeps the separate HTTP tool gateway private; native TDAI prompt injection remains unchanged. Memory and skill bridge instructions use the MemoryProxy domain. For the optional direct Knowledge HTTP mode and its native public URL, see [Setup and operations](operations.md#published-interfaces-and-native-connections).
 
-The example assumes a host-installed Caddy service. Inside a separate container, `127.0.0.1` refers to that container, so these upstream addresses require a different network arrangement. Do not change AMS bindings to `0.0.0.0` to work around that distinction.
+The example assumes a host-installed Caddy service. Inside a separate container, `127.0.0.1` refers to that container, so these upstream addresses require your own network arrangement. AMS generates loopback host bindings; you own external forwarding and firewall rules.
 
 ## 2. Set public origins
 
 Point the three domains' DNS records at your VPS. If you publish an AAAA record, the VPS must also be reachable over IPv6. Caddy uses the domains to obtain and renew certificates; see [Automatic HTTPS](https://caddyserver.com/docs/automatic-https).
 
-Set these **origins without paths** in the AMS `.env`:
+Set the Panel origin in `~/.agent-memory-stack/.env`:
 
 ```dotenv
-MEMORY_PROXY_PUBLIC_URL="https://memory-proxy.my-domain.tld"
 PANEL_PUBLIC_URL="https://panel.my-domain.tld"
 ```
+
+Set MemoryProxy's public origin in the saved native root, normally `~/.config/agent-memory-stack/overrides/proxy.yaml`. Merge this field with the existing override contents:
+
+```yaml
+injection:
+  externalGatewayUrl: https://memory-proxy.my-domain.tld
+```
+
+In `overrides/panel-instances.json`, update the existing `ams` instance's `proxy_endpoint` to `https://memory-proxy.my-domain.tld`. Preserve the rest of that instance and the array: native arrays replace defaults as a whole. These two fields keep Proxy's advertised URLs and Panel's agent endpoints aligned. Use origins without endpoint paths; the agent-specific path is added separately.
 
 Then apply:
 
@@ -44,7 +52,7 @@ Then apply:
 ams apply
 ```
 
-From a source checkout, use `npm run dev -- apply`. There is no MCP public-origin setting: agents receive the chosen HTTPS MCP URL directly. Leave `KNOWLEDGE_PUBLIC_URL` unset while direct Knowledge HTTP tools are disabled. Public origins affect advertised URLs; they do not change the loopback bindings.
+From a source checkout, use `npm run dev -- apply`. There is no MCP public-origin setting: agents receive the chosen HTTPS MCP URL directly. The default MCP setup needs no public Knowledge HTTP base URL. Public origins affect advertised URLs; they do not change the loopback bindings. Apply preserves native overrides, so putting `MEMORY_PROXY_PUBLIC_URL` in runtime `.env` does not update these native fields.
 
 ## 3. Add the Caddy sites
 

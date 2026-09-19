@@ -109,3 +109,30 @@ test('seeded and explicitly edited numeric options preserve nonnumeric and empty
 });
 
 test.beforeEach(t => t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected network access in native unit test'); }));
+
+for (const key of [undefined, '']) test(`fresh native configuration preserves stock consumer tokens without a Core secret (${key === undefined ? 'absent' : 'empty'})`, () => {
+  const { CORE_API_KEY: _key, ...input } = settings;
+  if (key !== undefined) input.CORE_API_KEY = key;
+  const native = { ...templates,
+    'proxy.yaml': templates['proxy.yaml'] + '\ntdai: { apiKey: native-memory }\nskill: { serviceToken: native-skill }\nknowledge: { serviceToken: native-knowledge }\n',
+    'panel.env': templates['panel.env'] + 'KNOWLEDGE_AUTH_TOKEN=native-knowledge-http\n',
+  };
+  const documents = seedNativeServiceConfigs(input, native);
+  assert.equal(yaml(documents['core.yaml']).server.apiKey, key);
+  assert.equal(yaml(documents['proxy.yaml']).tdai.apiKey, 'native-memory');
+  assert.equal(yaml(documents['proxy.yaml']).skill.serviceToken, 'native-skill');
+  assert.equal(yaml(documents['proxy.yaml']).knowledge.serviceToken, 'native-knowledge');
+  assert.equal(JSON.parse(documents['panel-instances.json']).instances[0].api_key, 'local');
+  assert.equal(parseNativeDocument(documents['panel.env'], 'env').KNOWLEDGE_AUTH_TOKEN, 'native-knowledge-http');
+  assert.equal(yaml(documents['proxy.yaml']).auth.enabled, true);
+  assert.match(proxyAdminKey(documents), /^sk-ams-proxy-admin-/);
+  const runtime = nativeRuntimeConfigs(input, documents);
+  assert.equal(runtime['mcp.json'].coreApiKey, '');
+  assert.equal(runtime['bootstrap-env.json'].CORE_API_KEY, '');
+  assert.equal(runtime['access-env.json'].CORE_API_KEY, '');
+  documents['core.yaml'] = edit(documents['core.yaml'], 'yaml', 'server.apiKey', 'operator-service-key');
+  const explicit = nativeRuntimeConfigs(input, documents);
+  assert.equal(explicit['mcp.json'].coreApiKey, 'operator-service-key');
+  assert.equal(explicit['bootstrap-env.json'].CORE_API_KEY, 'operator-service-key');
+  assert.equal(explicit['access-env.json'].CORE_API_KEY, 'operator-service-key');
+});

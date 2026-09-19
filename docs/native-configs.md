@@ -4,7 +4,7 @@ Edit `overrides/`, then run `ams apply`. AMS combines the selected TDAI defaults
 
 ## Two visible configuration sets
 
-The native root defaults to `~/.config/agent-memory-stack`, or `$XDG_CONFIG_HOME/agent-memory-stack` when `XDG_CONFIG_HOME` is absolute. The runtime remembers that location in `~/.agent-memory-stack/.ams/native-config.json`. Relative roots and occupied unassociated directories are rejected.
+The native root defaults to `~/.config/agent-memory-stack`, or `$XDG_CONFIG_HOME/agent-memory-stack` when `XDG_CONFIG_HOME` is absolute. Runtime `~/.agent-memory-stack/.ams/native-config.json` remembers that location and whether initial generated origins were finalized. If the reference is missing, AMS reads complete `defaults/` and `overrides/` from the selected root, preserves their values and recreates the reference during Configure or Apply. Incomplete or malformed native documents remain an error. Other files can coexist in the directory and are preserved during initial setup. Relative roots are rejected. AMS creates no state, ownership or checksum file in the native root.
 
 | Set | Contents | On a TDAI update |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ Each set uses the same native filenames:
 | `panel.env` | MemoryPanel `.env.example` |
 | `panel-instances.json` | MemoryPanel `metadata-instances.example.json` |
 
-Initial Configure obtains the selected verified source archive from download, cache or an offline bundle and extracts all five originals directly into `defaults/`. There are no revision subdirectories or packaged template copies. This requires no image build or running engine. Every installation initializes all five native documents for the complete local stack. Make edits in overrides: changes to the managed defaults fail their checksum check. An absent override field inherits the current upstream default. The ordinary apply/update flow does not reseed deleted overrides or restore earlier wizard answers. Explicit wizard changes update their selected fields and preserve unrelated overrides.
+Initial Configure obtains the selected verified source archive from download, cache or an offline bundle and extracts all five originals directly into `defaults/`. There are no revision subdirectories or packaged template copies. This requires no image build or running engine. Every installation initializes all five native documents for the complete local stack. Both directories are operator-owned. Direct edits to defaults are accepted by ordinary Configure and Apply; use overrides when a change must survive a TDAI update, because an explicit update replaces all five defaults. An absent override field inherits the current default. Ordinary runs do not reseed deleted overrides or restore earlier wizard answers. Explicit wizard changes update their selected fields and preserve unrelated overrides.
 
 Runtime `.env`, `compose.yaml`, image records, data and OAuth remain in `~/.agent-memory-stack`. Its `.env` owns host ports, `DATA_DIR`, CLIProxyAPI and helper settings. TDAI service values come from the two native sets. Effective container generations are derived runtime copies, not another configuration source to edit.
 
@@ -45,7 +45,19 @@ Other `llm` fields inherit defaults unless they already have entries in your ove
 
 Proxy's model connection is `upstream.url` / `upstream.apiKey`; its Core connection is `tdai.endpoint` / `tdai.apiKey`. Panel's Core connection belongs to its `ams` instance in `overrides/panel-instances.json`. Panel's Knowledge address is `KNOWLEDGE_SERVICE_URL` in `overrides/panel.env`; Knowledge's callback address is `TMC_CALLBACK_URL` in `overrides/knowledge.env`.
 
-To change internal model routing, set `INTERNAL_LLM_SOURCE=external` or `cliproxy` in runtime `.env`, set the matching endpoint/key overrides for both Core and Knowledge, and apply. Core and Knowledge have independent settings. Changing a shared key does not silently rewrite explicit overrides. Keep consumer credentials aligned yourself; authentication failures are reported by the running services. Initial automatic host-port allocation fills pending local origins. Later port changes preserve explicit origins and report required adjustments, including Caddy upstream ports.
+To change internal model routing, set `INTERNAL_LLM_SOURCE=external` or `cliproxy` in runtime `.env`, set the matching endpoint/key overrides for both Core and Knowledge, and apply. Core and Knowledge have independent settings. Changing a shared key does not silently rewrite explicit overrides. Keep consumer credentials aligned yourself; authentication failures are reported by the running services. Initial automatic host-port allocation stages pending local origins. Startup retries recalculate those generated origins for newly allocated ports; successful activation saves them. Operator-supplied origins remain intact. Later port changes preserve saved origins and report required adjustments, including Caddy upstream ports.
+
+Public URLs also have explicit owners:
+
+| Advertised URL | Edit |
+| --- | --- |
+| MemoryProxy links in native prompts | `overrides/proxy.yaml`: `injection.externalGatewayUrl` |
+| MemoryProxy endpoints shown in Panel | `overrides/panel-instances.json`: the `ams` instance's `proxy_endpoint` |
+| Optional direct Knowledge HTTP tools | `overrides/knowledge.env`: `KNOWLEDGE_PUBLIC_BASE_URL`, including `/v3`; publish the access gateway with `KNOWLEDGE_TOOLS_PUBLIC_ENABLED=true` in runtime `.env` |
+| Panel URL shown by AMS | `PANEL_PUBLIC_URL` in runtime `.env` |
+| MCP URL used by an agent | The agent's MCP registration, with `/mcp` |
+
+Follow [the Caddy guide](caddy.md#2-set-public-origins) to set matching Proxy and Panel origins. Runtime `.env` values named `MEMORY_PROXY_PUBLIC_URL` or `KNOWLEDGE_PUBLIC_URL` do not replace the effective native fields during Apply.
 
 ## Overlay rules and deletion
 
@@ -66,13 +78,30 @@ YAML and env keep native service semantics. AMS delivers files without shell eva
 
 ## Updates and validation
 
-Every update stages all five new templates and composes them with existing overrides. AMS checks document syntax, overlay/deletion instructions, template provenance, root ownership, input freshness and image records before activation. Explicit overrides keep priority even when defaults change. Removed or structurally changed upstream paths addressed by overrides produce redacted diagnostics. Native and orchestration values are operator-owned: AMS does not enforce host/service ports, DATA_DIR, engine/provider choices, paths, URL shapes, API prefixes, model names, credentials or matching connections. TDAI loaders and runtime checks can reject them or fail startup. Correct service failures in overrides and apply again.
+Every explicit update stages all five new templates and composes them with existing overrides. AMS checks the downloaded source archive, document syntax, overlay/deletion instructions, input freshness and image records before activation. Explicit overrides keep priority when defaults change. Removed or structurally changed upstream paths addressed by overrides produce redacted diagnostics. Native and orchestration values are operator-owned: AMS does not enforce host/service ports, DATA_DIR, engine/provider choices, paths, URL shapes, API prefixes, model names, credentials or matching connections. TDAI loaders and runtime checks can reject them or fail startup. Correct service failures in either visible set and apply again.
 
-No populated baseline, private service-value seed or merge-resolution file is used. A change during preparation invalidates the prepared candidate. Missing templates, changed default hashes, malformed documents or deletion instructions, and failed image preparation retain the active generation. Passing these checks does not prove that TDAI will accept the configured values. Standalone configuration check reads the composed installation and checks document structure and provenance; it does not validate configured values.
+No populated baseline, private service-value seed, persisted template manifest or merge-resolution file is used. A change during preparation invalidates the prepared candidate. Missing documents, malformed documents or deletion instructions, and failed image preparation retain the active generation. Passing these checks does not prove that TDAI will accept the configured values. Standalone configuration check reads the composed installation and checks document structure; it does not compare defaults with upstream or validate configured values.
 
 Apply mounts an immutable effective generation read-only. Editing overrides affects the next apply, not the running generation. Overrides and recovery snapshots can contain secrets; retain restricted permissions. Offline bundles contain the verified source archive and matching image provenance. Originals are extracted into the same flat defaults layout; installation overrides stay outside the bundle. Ordinary Apply reads existing defaults and overrides without fetching templates again.
 
 Changing native listener ports, paths or API prefixes passes those values to TDAI; it does not automatically reconfigure Compose mappings, helper URLs or health checks. AMS helpers still use their existing `/v3` routes. A custom prefix being accepted by configuration composition does not mean the integrated stack supports it.
+
+## Core service authentication
+
+AMS leaves Core `server.apiKey` to native configuration and does not generate or initially seed it. The selected original template leaves it empty. With an empty key, Core skips its native service guard, including for `/v3/instance/destroy` and other routes without a separate user check. Core stays unpublished by default. Proxy still verifies the agent's Core user key, and AMS MCP/access still enforce their user/resource checks.
+
+Keep the native client token fields nonempty: the selected Proxy template supplies `local` for `tdai.apiKey`, `skill.serviceToken` and `knowledge.serviceToken`; AMS preserves those defaults when no Core service key is configured. The initial Panel `ams` instance likewise uses `api_key: "local"`. These public values satisfy native client/registry requirements. They provide no Core service authentication while Core `server.apiKey` is empty, and they are not agent user keys. Clearing Core's guard does not require clearing these client fields.
+
+You can set `server.apiKey` in `overrides/core.yaml`; Configure, Apply and updates preserve that explicit value. Keep the corresponding native consumer credentials aligned. The pinned Proxy omits the service Bearer in its user-verification request, so enabling this optional key can cause Proxy requests to fail with HTTP 401. AMS supplies no source patch or automatic repair.
+
+To deliberately clear a saved Core service key, set this override and run `ams apply`:
+
+```yaml
+server:
+  apiKey: ""
+```
+
+This changes neither Core user identities nor the separate Proxy administrative key. Defaults remain unchanged, and Apply does not clear an operator-supplied Core key automatically.
 
 ## Native Proxy administration
 
@@ -82,10 +111,10 @@ The initially generated credential is independent of Panel/Core administrator lo
 
 ## Recovery
 
-A configuration snapshot carries exact defaults, overrides, deletion declarations, template provenance, initial-origin state and the runtime root association with matching source/image records. To recover, first preserve `.ams/previous-settings` outside the installation, stop its writers, and restore the matching runtime snapshot and compatible package/images/data. From the matching AMS checkout or installed package, restore its native state:
+A configuration snapshot carries exact defaults, overrides and deletion declarations. The matching runtime inputs carry the native-root reference, initial-origin state, selected source and images. To recover, first preserve `.ams/previous-settings` outside the installation, stop its writers, and restore the matching runtime snapshot and compatible package/images/data. From the matching AMS checkout or installed package, restore its native configuration:
 
 ```sh
 node dist/runtime/restore-native.js ~/.agent-memory-stack /absolute/path/to/saved-previous-settings
 ```
 
-Then run `ams apply`. Incomplete TDAI snapshots are rejected; a leftover native directory is not adopted without its saved association. Configuration recovery does not roll back application databases. A cold backup includes the complete `DATA_DIR`, native root and runtime `.env`, `compose.yaml`, `.ams`; keep only one active OAuth refresher.
+Then run `ams apply`. Incomplete TDAI snapshots are rejected. A missing runtime reference does not require manual repair when the selected native root contains complete composable files; normal Configure or Apply saves the reference again. Configuration recovery does not roll back application databases. A cold backup includes the complete `DATA_DIR`, native root and runtime `.env`, `compose.yaml`, `.ams`; keep only one active OAuth refresher.

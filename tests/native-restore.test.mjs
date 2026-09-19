@@ -61,6 +61,16 @@ test('explicit native restore cancels abandoned update and resets protected appl
   assert.equal((await loadSourceLock(f.directory)).sources.tencent.revision, f.source.revision);
 });
 
+test('native restore ignores unsupported metadata fields', async t => {
+  const f = await fixture(t);
+  const backup = JSON.parse(await readFile(join(f.snapshot, '.ams/native-backup.json'), 'utf8'));
+  const reference = JSON.parse(await readFile(join(f.snapshot, '.ams/native-config.json'), 'utf8'));
+  await writeFile(join(f.snapshot, '.ams/native-backup.json'), JSON.stringify({ ...backup, operatorNotes: 'war and peace' }));
+  await writeFile(join(f.snapshot, '.ams/native-config.json'), JSON.stringify({ ...reference, operatorNotes: 'war and peace' }));
+  await restoreNativeSnapshot(f.directory, f.snapshot);
+  assert.equal(await captureNativeConfiguration(f.directory), f.restoredNative);
+});
+
 test('next failed apply uses restored revision and keeps a coherent restored rollback snapshot', async t => {
   const f = await fixture(t);
   await restoreNativeSnapshot(f.directory, f.snapshot);
@@ -100,7 +110,7 @@ test('native restore requires the snapshot reference to match the native backup'
   const f = await fixture(t);
   await rm(join(f.snapshot, '.ams/native-config.json'));
   const before = await captureNativeConfiguration(f.directory);
-  await assert.rejects(restoreNativeSnapshot(f.directory, f.snapshot), /Invalid native configuration snapshot/);
+  await assert.rejects(restoreNativeSnapshot(f.directory, f.snapshot), /native-config\.json|Invalid native configuration snapshot/);
   assert.equal(await captureNativeConfiguration(f.directory), before);
 });
 
@@ -114,15 +124,17 @@ test('mismatched restore keeps pending target and previous provenance untouched'
   await stat(join(f.directory, '.ams/apply-pending'));
 });
 
-test('snapshot round-trip preserves both sets, deletion bytes, provenance and effective settings', async t => {
+test('snapshot round-trip preserves both sets, deletion bytes, source/reference records and effective settings', async t => {
   const f = await fixture(t);
   const backup = JSON.parse(f.restoredNative);
   assert.equal(Object.keys(backup.defaults).length, 5);
   assert.equal(Object.keys(backup.overrides).length, 5);
-  assert.equal(Object.hasOwn(backup.state, 'provisioned'), false);
-  assert.equal(backup.state.manifest.source.revision, f.source.revision);
-  assert.equal(Object.hasOwn(backup.state, 'seedEnv'), false);
-  assert.equal(Object.hasOwn(backup.state, 'files'), false);
+  assert.equal(Object.hasOwn(backup, 'state'), false);
+  assert.equal(Object.hasOwn(backup, 'originsFinalized'), false);
+  assert.deepEqual(JSON.parse(await readFile(join(f.snapshot, '.ams/tdai-source.json'), 'utf8')), f.source);
+  assert.deepEqual(JSON.parse(await readFile(join(f.snapshot, '.ams/native-config.json'), 'utf8')), {
+    version: 1, root: f.root, originsFinalized: true,
+  });
   const deletionText = '{\n  "core.yaml": ["/optionalRemovedSetting"]\n}\n';
   backup.deletions = deletionText;
   await writeFile(join(f.snapshot, '.ams/native-backup.json'), JSON.stringify(backup));
@@ -142,9 +154,6 @@ test('snapshot round-trip preserves both sets, deletion bytes, provenance and ef
 test('incomplete or corrupt two-set snapshots fail before replacing any active bytes', async t => {
   for (const mutate of [
     saved => { delete saved.defaults['panel.env']; },
-    saved => { saved.defaults['core.yaml'] += '\nmodifiedTemplate: true\n'; },
-    saved => { delete saved.state.manifest; },
-    saved => { delete saved.state.originsFinalized; },
     saved => { saved.overrides['proxy.yaml'] = '[invalid'; },
     saved => { saved.deletions = '{"unknown.yaml":["/field"]}'; },
   ]) {
@@ -159,12 +168,33 @@ test('incomplete or corrupt two-set snapshots fail before replacing any active b
   }
 });
 
-test('restore refuses to adopt an occupied root without its active association', async t => {
+test('invalid snapshot reference fails before replacing any active bytes', async t => {
+  for (const reference of [
+    { version: 1, root: '/missing-origins' },
+    { version: 1, root: '/different-root', originsFinalized: true },
+  ]) {
+    const f = await fixture(t);
+    const before = await captureNativeConfiguration(f.directory);
+    await writeFile(join(f.snapshot, '.ams/native-config.json'), JSON.stringify(reference));
+    await assert.rejects(restoreNativeSnapshot(f.directory, f.snapshot), /native-config\.json|snapshot reference/);
+    assert.equal(await captureNativeConfiguration(f.directory), before);
+    await stat(join(f.directory, '.ams/pending-tdai-source.json'));
+  }
+});
+
+test('explicit restore adopts an occupied root without an active reference', async t => {
   const f = await fixture(t);
-  const before = await readFile(join(f.root, 'overrides/core.yaml'), 'utf8');
+  const expected = JSON.parse(f.restoredNative);
+  const unrelatedState = '{"source":"unrelated"}\n';
+  await writeFile(join(f.root, '.ams-state.json'), unrelatedState);
+  await writeFile(join(f.root, 'overrides/core.yaml'), 'changed: after-snapshot\n');
   await rm(join(f.directory, '.ams/native-config.json'));
-  await assert.rejects(restoreNativeSnapshot(f.directory, f.snapshot), /occupied or unassociated/);
-  assert.equal(await readFile(join(f.root, 'overrides/core.yaml'), 'utf8'), before);
+  await restoreNativeSnapshot(f.directory, f.snapshot);
+  assert.equal(await readFile(join(f.root, 'overrides/core.yaml'), 'utf8'), expected.overrides['core.yaml']);
+  assert.deepEqual(JSON.parse(await readFile(join(f.directory, '.ams/native-config.json'), 'utf8')), {
+    version: 1, root: f.root, originsFinalized: true,
+  });
+  assert.equal(await readFile(join(f.root, '.ams-state.json'), 'utf8'), unrelatedState);
 });
 
 test('native restore rejects absent or invalid matching image records before replacing either set', async t => {

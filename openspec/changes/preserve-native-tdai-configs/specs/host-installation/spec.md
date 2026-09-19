@@ -1,8 +1,10 @@
+> Synchronized with the current main specification on 2026-09-19. Overlapping requirements reflect the final stock-TDAI contract; prior design narratives remain historical. Archive this already-synchronized change without applying its deltas again.
+
 ## MODIFIED Requirements
 
 ### Requirement: Read-only existing installation exit
 
-When a complete stack is detected, interactive setup SHALL exit successfully with guidance to inspect the existing installation's defaults/, edit its native overrides/, and edit orchestration `.env`. If non-secret project metadata or its persisted root reference identifies the native configuration location, output SHALL identify its defaults/ and overrides/ locations and the corresponding orchestration `.env`. A known working directory alone SHALL identify the runtime directory and its `.env`, without guessing a different native root; absent metadata SHALL produce generic guidance without inventing a path. Detection SHALL NOT read configuration credentials, query Core administrator state, modify files, or create, start, stop, remove, or repair containers. The existing saved target SHALL remain a convenience reference rather than an ownership authority.
+When a complete stack is detected, interactive setup SHALL exit successfully with guidance to inspect the existing installation's defaults/, edit its native overrides/, and edit orchestration `.env`. If non-secret project metadata or its persisted root reference identifies the native configuration location, output SHALL identify its defaults/ and overrides/ locations and the corresponding orchestration `.env`. A known working directory alone SHALL identify the runtime directory and its `.env`, without guessing a different native root; absent metadata SHALL produce generic guidance without inventing a path. Detection SHALL NOT read configuration credentials, query Core administrator state, modify files, or create, start, stop, remove, or repair containers. The recorded native root association SHALL identify configuration ownership independently of this best-effort container discovery.
 
 #### Scenario: Existing stack has a working-directory label
 - **WHEN** a detected complete project supplies its working directory

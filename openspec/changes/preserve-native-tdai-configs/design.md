@@ -1,3 +1,5 @@
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## Context
 
 See `proposal.md` for the motivation and scope. TDAI uses two visible native configuration sets: exact upstream defaults and persistent operator overrides. The deployment contract always includes the complete local stack; service-selection and remote-placement branches are removed.
@@ -20,7 +22,7 @@ Remove `AMS_SERVICES`, deployment-version selection metadata, placement modes, `
 
 ### Two visible sets under the recorded native root
 
-Resolve `$XDG_CONFIG_HOME/agent-memory-stack` or `~/.config/agent-memory-stack` once and retain the runtime association. Reject relative roots and occupied unassociated directories; never silently adopt abandoned native state. Use this layout:
+Resolve `$XDG_CONFIG_HOME/agent-memory-stack` or `~/.config/agent-memory-stack` once and retain it in runtime `.ams/native-config.json` with `version`, `root` and `originsFinalized`; ignore additional fields. Reject relative roots. When the reference is missing, adopt complete composable sets from the selected root with finalized operator-owned origins. Ignore unrelated files, including `.ams-state.json`. Use this layout:
 
 ```text
 ~/.config/agent-memory-stack/
@@ -39,7 +41,7 @@ Resolve `$XDG_CONFIG_HOME/agent-memory-stack` or `~/.config/agent-memory-stack` 
     deletions.json          # optional field-removal declarations
 ```
 
-`defaults/` is AMS-managed, inspectable and byte-identical to the selected source templates under the corresponding local names. Initial setup makes all five templates available and initializes their overlays together. Direct default edits fail the provenance check with guidance to put changes in overrides. A separate manifest records source revision, upstream paths and hashes. Only successful source activation replaces the active defaults.
+`defaults/` is operator-owned and inspectable. Initial setup copies all five selected source templates and initializes their overlays together. Ordinary Configure and Apply preserve direct default edits. An explicit TDAI update replaces all five defaults from its verified source archive. No persisted template manifest, default checksum index or ownership marker exists.
 
 `overrides/` contains partial documents in the same native formats. AMS initially fills the known installation values there; subsequent ordinary apply and template update preserve the operator's files and comments. Missing override entries mean inheritance. Overrides may add upstream-supported fields absent from defaults. A service with no overrides needs no populated overlay file. Overrides, effective runtime files and snapshots can contain secrets and use restricted permissions.
 
@@ -55,7 +57,7 @@ The runtime working directory, Compose identity, data paths and OAuth storage re
 | Panel | `MemoryPanel/.env.example` | `panel.env` |
 | Panel registry | `MemoryPanel/config/metadata-instances.example.json` | `panel-instances.json` |
 
-Package the pinned revision's complete templates and provenance so save-only setup works without a checkout, network or engine. Offline TDAI bundles must include their matching source metadata, all templates and checksums. Reject missing or inconsistent assets before engine import. Distributed templates contain no installation overrides, populated credentials or user data.
+Acquire the pinned revision's complete templates from its verified source archive so save-only setup works without a checkout or engine. Offline TDAI bundles include matching source metadata and the verified source archive. Reject missing or inconsistent source assets before engine import. Distributed source artifacts contain no installation overrides, populated credentials or user data.
 
 ### Deterministic composition replaces intent inference
 
@@ -87,7 +89,7 @@ An explicit wizard operation changes only its reviewed fields in overrides and p
 
 ### Update defaults and retain overrides
 
-Stage the new verified source and all five new templates. Compose them with the current overrides and deletion declarations, then check document structure, provenance. A changed upstream default does not conflict with an explicit override: the override wins. An untouched field follows the new default. Deleting an override later exposes the new default.
+Stage the new verified source and all five new templates. Compose them with the current overrides and deletion declarations, then check document structure. A changed upstream default does not conflict with an explicit override: the override wins. An untouched field follows the new default. Deleting an override later exposes the new default.
 
 Report redacted paths when an upstream field addressed by an override disappeared or changed structural type. Preserve the override without interpreting its semantic validity: templates are examples, not exhaustive schemas. AMS does not run a native-value policy before activation; TDAI loaders and running services may reject incompatible values. Do not claim that every unsupported or renamed upstream option can be detected; do not relocate or discard unknown fields automatically. The operator corrects overrides and retries when a service fails loading or runtime checks.
 
@@ -105,9 +107,17 @@ The pinned Proxy supports `TDAI_PROXY_ADMIN_API_KEY`, while some other YAML/JSON
 
 ### Configured values belong to the operator
 
-AMS checks document syntax, overlay/deletion instructions, template hashes and provenance, root association, prepared-input fingerprints and image records. These checks protect composition and activation integrity. Remove AMS policy checks on native service and orchestration values, including host/native ports, DATA_DIR, engine/provider choices, bind addresses, paths, URLs, API prefixes, models, timeouts, token limits, credentials and cross-service equality. Standalone configuration check reads the complete composed installation and applies only structural and provenance checks.
+AMS checks document syntax, overlay/deletion instructions, runtime reference shape, prepared-input fingerprints, selected source integrity and image records. These checks protect composition and activation integrity without assigning ownership by checksum. Remove AMS policy checks on native service and orchestration values, including host/native ports, DATA_DIR, engine/provider choices, bind addresses, paths, URLs, API prefixes, models, timeouts, token limits, credentials and cross-service equality. Standalone configuration check reads the complete composed installation and applies only structural checks.
 
 The operator's native values reach service documents and derived environment transport as chosen. Service loaders can reject them and startup/authentication/readiness can fail after activation. Such failures preserve recovery information and require operator correction; semantic preflight success is not promised. This change does not propagate custom prefixes, native ports or paths into other helper contracts: helpers and readiness keep their existing `/v3` routes and fixed connections. Accepting a custom value is not evidence that the integrated stack supports it.
+
+### Optional Core service authentication
+
+AMS does not generate or initially seed Core `server.apiKey`. The selected original template leaves it empty; absent overrides inherit that value. Explicit operator keys and native consumer credentials remain supported and survive Configure, Apply and updates. Ordinary Apply never clears an existing key to make stock Proxy work. Removing a previously generated key from a live installation is an explicit operator configuration change, not a migration or automatic upgrade step.
+
+An empty key disables Core's native service guard, including Core administrative routes without separate user authentication. Core stays unpublished by default. Proxy still verifies the agent's Core user key; its independent `admin.apiKey`, Core's initial administrator identity and AMS MCP/access user/resource checks are unchanged. A nonempty operator Core key can reproduce the stock Proxy verification failure because that upstream client omits the service Bearer; source code remains unchanged.
+
+Stock clients still require nonempty token fields when Core does not compare a service secret. Initial setup preserves Proxy's template `local` values for `tdai.apiKey`, `skill.serviceToken` and `knowledge.serviceToken`; the initial Panel instance uses `api_key: "local"`. These are public native client values, not Core authentication or user keys. Explicit operator consumer values remain authoritative, and ordinary Apply does not repopulate them. No upstream source change is involved.
 
 ### Native administrator credentials remain persistent
 
@@ -117,9 +127,9 @@ Keep the upstream native `checkAdminAuth` integration in both the outer guard an
 
 ### Coherent activation and recovery
 
-Check document structure, overlay/deletion rules, source provenance, root ownership, verify required image identities and complete preflight before switching active default/source/image records or stopping services. Malformed documents or deletion instructions, invalid AMS orchestration, modified default hashes, missing assets and failed image preparation leave the prior active generation intact. Preserve the operator's desired overrides for correction and retry; do not silently undo their edits.
+Check document structure, overlay/deletion rules, runtime reference shape, selected source integrity, required image identities and complete preflight before switching active default/source/image records or stopping services. Malformed documents or deletion instructions, invalid AMS orchestration, concurrent input changes, missing assets and failed image preparation leave the prior active generation intact. Preserve the operator's desired defaults and overrides for correction and retry; do not silently undo their edits.
 
-Snapshots carry exact defaults, overrides, deletion declarations, template manifest, initial-origin state, root association, orchestration inputs and matching source/image records. If startup fails, retain the previous coherent generation for explicit recovery. Restore both sets together, so a subsequent apply reproduces the restored effective configuration. Reject incomplete TDAI snapshots before writes. Configuration recovery does not roll back application database changes.
+Native backups carry `root`, exact defaults, byte-preserved overrides and optional deletion declarations, while `.ams/native-config.json` carries the root and initial-origin state and `.ams/tdai-source.json` carries the selected source. Additional backup/reference fields are ignored. If startup fails, retain the previous coherent generation for explicit recovery. Restore both sets and the separate reference/source/image records together, so a subsequent apply reproduces the restored effective configuration. Reject incomplete TDAI snapshots before writes. Configuration recovery does not roll back application database changes.
 
 ## Risks / Trade-offs
 
@@ -131,7 +141,7 @@ Snapshots carry exact defaults, overrides, deletion declarations, template manif
 
 ## Implementation transition and verification
 
-Replace the current development implementation in place; add no conversion of the old populated-baseline layout. Rewrite the ownership, overlay, update and recovery tests against fresh isolated installations. Retain reusable template-provenance and native-auth coverage, then rerun packed-package, loader and container acceptance for the revised contract.
+Replace the current development implementation in place; add no conversion or compatibility path for earlier development layouts. Rewrite the overlay, update and recovery tests against fresh isolated installations. Retain source-integrity and native-auth coverage, then rerun packed-package, loader and container acceptance for the revised contract.
 
 `validation.md` and `runtime-validation.md` distinguish earlier runs from full-stack acceptance. Previous success counts do not establish acceptance of the full-stack cleanup; current checks are recorded separately with exact runtime and package evidence. Configured-value ownership and Configure-only model acceptance remains pending until section 7 is completed.
 

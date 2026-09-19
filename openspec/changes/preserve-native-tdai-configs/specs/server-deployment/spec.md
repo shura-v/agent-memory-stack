@@ -1,21 +1,23 @@
+> Synchronized with the current main specification on 2026-09-19. Overlapping requirements reflect the final stock-TDAI contract; prior design narratives remain historical. Archive this already-synchronized change without applying its deltas again.
+
 ## MODIFIED Requirements
 
 ### Requirement: Installation-owned TDAI updates
 
-`ams update tdai` SHALL use the same fixed runtime installation and associated native configuration root as `ams apply`, download the current `feat/server_team` commit, and prepare its revision, archive URL, and SHA-256 for `.ams/tdai-source.json`. Every TDAI version update SHALL stage all five exact native templates from that revision as defaults and compose them with byte-preserved overrides and deletion declarations. Document syntax, overlay/deletion and provenance checks, input fingerprint checks, and required image verification SHALL precede active replacement. Activation SHALL record matching source/image selection, defaults, overrides, and provenance together and perform the existing apply workflow. This command SHALL work from the installed npm package without a Git checkout or submodule and SHALL leave packaged sources and CLIProxyAPI selection unchanged.
+`ams update tdai` SHALL use the same fixed runtime installation and associated native configuration root as `ams apply`, download the current `feat/server_team` commit, and prepare its revision, archive URL, and SHA-256 for `.ams/tdai-source.json`. Every TDAI version update SHALL stage all five exact native templates from that revision as defaults and compose them with byte-preserved overrides and deletion declarations. Document syntax, overlay/deletion structure, selected source integrity, input fingerprint checks, and required image verification SHALL precede active replacement. Activation SHALL record the matching source/image selection, defaults, overrides, deletion declarations, and root/origin reference together and perform the existing apply workflow. This command SHALL work from the installed npm package without a Git checkout or submodule and SHALL leave packaged sources and CLIProxyAPI selection unchanged.
 
 #### Scenario: Update an existing installation
 - **WHEN** the operator runs `ams update tdai` with saved valid full-stack configuration
 - **THEN** source fetching, image fingerprints, and TDAI image revision labels use the installation's selected revision
 - **AND** later `ams apply` invocations retain that revision until another update
-- **AND** the settings snapshot preserves the previously applied source selection, defaults, overrides, deletion declarations, template manifest, root association, and persistent secrets
+- **AND** the settings snapshot preserves the previously applied source selection, defaults, overrides, deletion declarations, root/origin reference, and persistent secrets
 
 #### Scenario: Source download fails
 - **WHEN** GitHub commit resolution or archive download fails
 - **THEN** the previous source selection remains unchanged and apply does not begin
 
 #### Scenario: Effective configuration is incompatible with a new revision
-- **WHEN** the new defaults and saved overrides cannot be composed due to document syntax, deletion or provenance errors
+- **WHEN** the new defaults and saved overrides cannot be composed due to document syntax, deletion or reference errors
 - **THEN** update reports the file and setting requiring correction in overrides without disclosing secret values
 - **AND** active native files, selected source and image identities, and running containers remain unchanged
 
@@ -32,7 +34,7 @@
 
 Interactive setup SHALL display the initial menu. After the operator chooses Configure stack, it SHALL check for a complete visible AMS container group before any configuration question. A detected complete stack SHALL produce native-configuration and orchestration .env guidance and a successful early exit without prompting for an administrator key or reading credentials. This short-circuit SHALL NOT inspect or classify Core initialization state. Explicit apply SHALL remain available with the Core-state-based bootstrap behavior defined by deployment-composition; the guard SHALL NOT remove that command or add administrator recovery.
 
-When no complete stack is detected, setup SHALL ask for the internal model source for Core and Knowledge. It SHALL offer `Use this stack's CLIProxyAPI` and `Connect another model API`, selecting the first for a fresh installation. It SHALL ask for actual LLM endpoint/API key only for the external source, and separate memory and Knowledge models for both services. Both model questions SHALL occur during Configure stack. Apply SHALL consume saved model values without discovery, prompts or required-model enforcement. Setup SHALL also ask for the account provider for local CLIProxyAPI and remaining interactive operational settings. It SHALL retain `homedir()/.agent-memory-stack` for runtime orchestration and use the recorded XDG-based root for native service files, without a directory question. It SHALL manage `DATA_DIR` through `.env` without a data-directory question, defaulting to `./data` relative to the Compose configuration directory and preserving any saved value exactly. It SHALL derive fresh local topology, stack origins, and host ports without questions and preserve advanced .env configuration. Local Core/CLIProxyAPI service keys SHALL be reused or generated automatically. Existing secrets SHALL remain masked. The server .env SHALL remain the editable source for AMS orchestration settings. Setup SHALL copy all five exact templates into visible defaults/ under the configured XDG-based root and initially populate known installation values in partial native-format overrides/. Subsequent ordinary apply and update SHALL preserve override bytes; an explicit wizard operation SHALL change only reviewed fields and preserve unrelated values. Resolved published ports SHALL remain persisted orchestration settings. First allocation SHALL finalize missing or unset derived local origin overrides; later port changes SHALL preserve explicit origins and report any required adjustment. Native and orchestration values SHALL pass through without AMS value-policy validation; actual service loading and runtime execution MAY fail.
+When no complete stack is detected, setup SHALL ask for the internal model source for Core and Knowledge. It SHALL offer `Use this stack's CLIProxyAPI` and `Connect another model API`, selecting the first for a fresh installation. It SHALL ask for actual LLM endpoint/API key only for the external source, and separate memory and Knowledge models for both services. Both model questions SHALL occur during Configure stack. Apply SHALL consume saved model values without discovery, prompts or required-model enforcement. Setup SHALL also ask for the account provider for local CLIProxyAPI and remaining interactive operational settings. It SHALL retain `homedir()/.agent-memory-stack` for runtime orchestration and use the recorded XDG-based root for native service files, without a directory question. It SHALL manage `DATA_DIR` through `.env` without a data-directory question, defaulting to `./data` relative to the Compose configuration directory and preserving any saved value exactly. It SHALL derive fresh local topology, stack origins, and host ports without questions and preserve advanced .env configuration. CLIProxyAPI service keys SHALL be reused or generated automatically. Core server.apiKey SHALL remain an optional operator-owned native setting, without AMS generation or initial seeding. Existing secrets SHALL remain masked. The server .env SHALL remain the editable source for AMS orchestration settings. Setup SHALL copy all five exact templates into visible defaults/ under the configured XDG-based root and initially populate known installation values in partial native-format overrides/. Subsequent ordinary apply and update SHALL preserve override bytes; an explicit wizard operation SHALL change only reviewed fields and preserve unrelated values. Resolved published ports SHALL remain persisted orchestration settings. Initial allocation SHALL keep generated origins synchronized through retries and finalize them after successful activation; later port changes SHALL preserve explicit origins and report any required adjustment. Native and orchestration values SHALL pass through without AMS value-policy validation; actual service loading and runtime execution MAY fail.
 
 
 #### Scenario: Configure Z.ai and ChatGPT
@@ -63,6 +65,7 @@ When no complete stack is detected, setup SHALL ask for the internal model sourc
 - **WHEN** the operator configures the full stack
 - **THEN** it SHALL ask for the CLIProxyAPI account provider before `Models for memory and Knowledge`
 - **AND** model selection remains part of Configure stack and account authorization remains part of apply
+- **AND** local Core model input shows only the selected account family: `Core memory model (Anthropic)` for Claude or `Core memory model (OpenAI)` for Codex
 
 #### Scenario: Apply the account provider already selected in setup
 - **WHEN** the user selects a CLIProxyAPI account provider and accepts `Apply configuration now?`, or later runs standalone apply
@@ -72,12 +75,12 @@ When no complete stack is detected, setup SHALL ask for the internal model sourc
 
 ### Requirement: Independent internal LLM routing
 
-Panel startup SHALL preserve the effective Core/Knowledge LLM configuration. Internal source SHALL be recorded as `INTERNAL_LLM_SOURCE=cliproxy|external`. In cliproxy mode, initial overrides SHALL configure Core and Knowledge with this installation's local CLIProxyAPI base and service key. In external mode, initial overrides SHALL use the operator-configured LLM base and key. Subsequent application SHALL compose each consumer's defaults and overrides and preserve its explicit endpoint, key, and model. Changing orchestration source or shared service key SHALL NOT silently rewrite native overrides or trigger semantic connection enforcement. Operators SHALL maintain working endpoint/key combinations; actual loading and runtime authentication MAY fail. Both modes SHALL retain separate memory and Knowledge models, independent of the model in agent requests. Provider-issued credentials SHALL retain their original contents. Retained inactive source metadata SHALL NOT override active effective settings. CLIProxyAPI SHALL remain local in both internal LLM modes. This mode SHALL NOT publish another host interface.
+AMS SHALL deliver the effective Core/Knowledge LLM configuration without rewriting it on Panel startup. The selected stock TDAI revision SHALL determine its runtime behavior. Internal source SHALL be recorded as `INTERNAL_LLM_SOURCE=cliproxy|external`. In cliproxy mode, initial overrides SHALL configure Core and Knowledge with this installation's local CLIProxyAPI base and service key. In external mode, initial overrides SHALL use the operator-configured LLM base and key. Subsequent application SHALL compose each consumer's defaults and overrides and preserve its explicit endpoint, key, and model. Changing orchestration source or shared service key SHALL NOT silently rewrite native overrides or trigger semantic connection enforcement. Operators SHALL maintain working endpoint/key combinations; actual loading and runtime authentication MAY fail. Both modes SHALL retain separate memory and Knowledge models, independent of the model in agent requests. Provider-issued credentials SHALL retain their original contents. Retained inactive source metadata SHALL NOT override active effective settings. CLIProxyAPI SHALL remain local in both internal LLM modes. This mode SHALL NOT publish another host interface.
 
 #### Scenario: Panel restart preserves Z.ai routing
 - **WHEN** Panel restarts and a subsequent Wiki ingestion runs
-- **THEN** the request reaches the configured internal LLM endpoint with the Knowledge model
-- **AND** it does not depend on an online client or replace the binding with the agent model
+- **THEN** AMS preserves the configured native endpoint and model inputs
+- **AND** functional validation records whether the stock services use them as expected independently of the agent model
 
 #### Scenario: Share access while keeping model choices separate
 - **WHEN** local mode has authorized CLIProxyAPI, valid effective local API access, and different configured Core and Knowledge model names
@@ -92,7 +95,7 @@ Panel startup SHALL preserve the effective Core/Knowledge LLM configuration. Int
 #### Scenario: Preserve independent native consumer edits
 - **WHEN** an operator edits Core or Knowledge's model, endpoint, or credential override after initial setup
 - **THEN** ordinary apply uses each consumer's own effective native values without restoring wizard answers or another consumer's settings
-- **AND** provider credential bytes remain unchanged through native loading
+- **AND** AMS preserves the saved credential input while native loading determines its runtime interpretation
 
 #### Scenario: Switch from local model access to native external connections
 - **WHEN** the operator changes INTERNAL_LLM_SOURCE from cliproxy to external and provides endpoint and credential overrides for each active native consumer
@@ -101,11 +104,11 @@ Panel startup SHALL preserve the effective Core/Knowledge LLM configuration. Int
 
 ### Requirement: One server Compose with loopback entry points
 
-The delivery SHALL provide one Compose project per installation, containing all six applications: MemoryCore, MemoryKnowledge, MemoryPanel, MemoryProxy, CLIProxyAPI and MCP, together with config, bootstrap, access and knowledge-service support containers. Only Panel, MemoryProxy, and MCP SHALL publish host ports by default, all on `127.0.0.1` and without enablement questions. Core, CLIProxyAPI, direct Knowledge HTTP tools, and Knowledge service interfaces SHALL remain internal unless an advanced .env override explicitly enables authenticated loopback exposure. MCP SHALL reach the protected Knowledge gateway over the Compose network. Raw Knowledge SHALL remain private. The stack SHALL allow the outbound connections required for LLM calls and OAuth.
+The delivery SHALL provide one Compose project per installation, containing all six applications: MemoryCore, MemoryKnowledge, MemoryPanel, MemoryProxy, CLIProxyAPI and MCP, together with config, bootstrap and access support containers. Only Panel, MemoryProxy, and MCP SHALL publish host ports by default, all on `127.0.0.1` and without enablement questions. Core, CLIProxyAPI, direct Knowledge HTTP tools, and Knowledge raw service interface SHALL remain internal unless an advanced .env override explicitly enables native loopback exposure. MCP SHALL reach the protected Knowledge gateway over the Compose network. Raw Knowledge SHALL remain unpublished by default. Authentication on native service interfaces SHALL remain owned by the selected upstream service, including its limitations. The stack SHALL allow the outbound connections required for LLM calls and OAuth.
 
 #### Scenario: Start the server stack
 - **WHEN** the operator starts the configured server project with no optional service interfaces
-- **THEN** all six application services and four support containers run in that project with explicit readiness dependencies
+- **THEN** all six application services and three support containers run in that project with explicit readiness dependencies
 - **AND** only Panel, MemoryProxy, and MCP are published on loopback without exposure prompts
 
 #### Scenario: Reach the host from another machine

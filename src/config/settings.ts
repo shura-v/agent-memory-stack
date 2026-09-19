@@ -7,7 +7,7 @@ export type Field = { name: string; label: string; default?: string; placeholder
 export const fields: Field[] = [
   ...['CORE', 'CLIPROXY', 'KNOWLEDGE'].map(prefix => ({ name: `${prefix}_SERVICE_ENABLED`, label: `Allow ${prefix} service connections from another machine`, default: 'false', choices: ['false', 'true'] })),
   { name: 'KNOWLEDGE_TOOLS_PUBLIC_ENABLED', label: 'Expose authenticated Knowledge HTTP tools', default: 'false', choices: ['false', 'true'] },
-  { name: 'CORE_SERVICE_PORT', label: 'Core authenticated service loopback port', default: '8420' },
+  { name: 'CORE_SERVICE_PORT', label: 'Core service loopback port', default: '8420' },
   { name: 'CLIPROXY_SERVICE_PORT', label: 'CLIProxyAPI authenticated service loopback port', default: '8317' },
   { name: 'KNOWLEDGE_SERVICE_PORT', label: 'Knowledge authenticated service loopback port', default: '8423' },
   { name: 'MEMORY_PROXY_PORT', label: 'MemoryProxy loopback port', default: '8096' },
@@ -23,7 +23,7 @@ export const fields: Field[] = [
   { name: 'LLM_API_KEY', label: 'API key', secret: true },
   { name: 'MEMORY_LLM_MODEL', label: 'Core memory model' },
   { name: 'KNOWLEDGE_LLM_MODEL', label: 'Knowledge model' },
-  { name: 'CORE_API_KEY', label: 'Core service key (required for service-to-Core authentication)', secret: true, role: 'core' },
+  { name: 'CORE_API_KEY', label: 'Core service key (optional native setting)', secret: true },
   { name: 'CLIPROXY_API_KEY', label: 'CLIProxyAPI service key', secret: true, role: 'cliproxy' },
   { name: 'CLIPROXY_AUTH_PROVIDER', label: 'CLIProxyAPI account provider', default: 'codex', choices: Object.keys(accountProviders) },
   { name: 'MEMORY_PROMPT_MODE', label: 'Memory prompt mode', default: 'code', choices: ['code', 'chat'] },

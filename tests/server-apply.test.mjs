@@ -281,17 +281,22 @@ async function assertAppliedOrigins(directory, expected, persisted = expected) {
 
 async function assertFinalizedOriginSnapshot(directory) {
   const native = JSON.parse(await captureNativeConfiguration(directory));
-  assert.equal(native.state.originsFinalized, true);
+  assert.equal(Object.hasOwn(native, 'state'), false);
+  assert.equal(Object.hasOwn(native, 'originsFinalized'), false);
+  const reference = JSON.parse(await readFile(join(directory, '.ams/native-config.json'), 'utf8'));
+  assert.equal(reference.originsFinalized, true);
   const applied = JSON.parse(await readFile(join(directory, '.ams/last-applied-inputs.json'), 'utf8'));
   assert.deepEqual(JSON.parse(applied['.ams/native-backup.json']), native,
     'the applied rollback baseline includes the finalized native origins');
+  assert.deepEqual(JSON.parse(applied['.ams/native-config.json']), reference,
+    'the applied rollback baseline includes finalized runtime metadata');
 }
 
 test('first activation bind retry regenerates deferred native origins before finalizing them', async t => {
   const f = await fixture(t);
   await writeFile(join(f.dir, '.env'), encodeEnv({ KNOWLEDGE_TOOLS_PUBLIC_ENABLED: 'true' }));
   await save(f);
-  assert.equal(JSON.parse(await captureNativeConfiguration(f.dir)).state.originsFinalized, false);
+  assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/native-config.json'), 'utf8')).originsFinalized, false);
   const generations = [];
   let allocations = 0;
   await applyServer(ui(), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
@@ -304,7 +309,7 @@ test('first activation bind retry regenerates deferred native origins before fin
       generations.push(await assertAppliedOrigins(f.dir, {
         proxy: `http://127.0.0.1:${19096 + offset}`, knowledgeBase: `http://127.0.0.1:${18422 + offset}/v3`, knowledgeOrigin: `http://127.0.0.1:${18422 + offset}`,
       }, { proxy: '', knowledgeBase: '', registry: undefined }));
-      assert.equal(JSON.parse(await captureNativeConfiguration(f.dir)).state.originsFinalized, false,
+      assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/native-config.json'), 'utf8')).originsFinalized, false,
         'origins are provisional until runtime activation succeeds');
       if (generations.length === 1) throw new PortBindingConflict('first allocated port was claimed');
       await rm(join(f.dir, '.ams/apply-pending'), { force: true });
@@ -360,13 +365,13 @@ test('a new Apply after failed first activation recomputes provisional origins f
       throw new Error('First activation readiness failed');
     },
   }) }), /First activation readiness failed/);
-  assert.equal(JSON.parse(await captureNativeConfiguration(f.dir)).state.originsFinalized, false);
+  assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/native-config.json'), 'utf8')).originsFinalized, false);
   let appliedGeneration;
   await applyServer(ui(), f.dir, { prepareImages: async () => images, runtime: () => runtime(f.dir, {
     reservePorts: async () => ({ ports: { MEMORY_PROXY_PORT: '19097', KNOWLEDGE_PORT: '18423' }, release: async () => {} }),
     apply: async () => {
       appliedGeneration = await assertAppliedOrigins(f.dir, { proxy: 'http://127.0.0.1:19097', knowledgeBase: 'http://127.0.0.1:18423/v3', knowledgeOrigin: 'http://127.0.0.1:18423' }, { proxy: '', knowledgeBase: '', registry: undefined });
-      assert.equal(JSON.parse(await captureNativeConfiguration(f.dir)).state.originsFinalized, false);
+      assert.equal(JSON.parse(await readFile(join(f.dir, '.ams/native-config.json'), 'utf8')).originsFinalized, false);
       await rm(join(f.dir, '.ams/apply-pending'), { force: true });
     },
   }) });
@@ -498,9 +503,7 @@ test('editing the active source during image preparation preserves the desired e
   const f = await fixture(t);
   await save(f, {});
   const nativeBefore = await captureNativeConfiguration(f.dir);
-  const originalSource = JSON.parse(nativeBefore).state.source;
   const sourcePath = join(f.dir, '.ams/tdai-source.json');
-  await writeFile(sourcePath, JSON.stringify(originalSource) + '\n');
   const imagePath = join(f.dir, '.ams/images.json');
   const originalImages = JSON.stringify(images) + '\n';
   await writeFile(imagePath, originalImages);

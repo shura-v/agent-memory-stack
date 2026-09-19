@@ -1,35 +1,43 @@
 {
   "schemaVersion": 1,
-  "capturedAt": "2026-09-19T01:11:20.141Z",
-  "change": "use-cliproxy-for-internal-models",
+  "capturedAt": "2026-09-19T16:48:48.202Z",
+  "change": "simplify-stock-tdai-integration",
   "sourceState": "working-tree",
   "branch": "release/0.1.0",
-  "baseCommit": "46432dd07257bc170348f8fda8857dbe19805516",
-  "note": "Sources were read from the working tree while this change was uncommitted. The base commit alone does not implement the documented model-source behavior. Hashes identify the reviewed source snapshot; this record is not evidence of a deployed stack.",
+  "baseCommit": "0938fde1fff48354c365f644c3574c485fe36519",
+  "note": "Source hashes identify the reviewed working-tree implementation, including stateless per-request SDK/stdio MCP and native configuration changes. Maps describe software connections and configuration contracts; they do not establish deployment or end-to-end runtime success.",
   "sources": [
     {
       "path": "src/deployment/model.ts",
-      "sha256": "f59ab4be83b0b0ca1e5605aa1bdd80a3ca6796e0abb5a45cb7fd33c1d2477e52"
+      "sha256": "54fd76d6a041b3c44ba7f3827620af1824c6a2375b606524c0a2d2095aa0e4af"
     },
     {
       "path": "src/config/internal-llm.ts",
-      "sha256": "a14752e80a6201206e9d4d98c5d886950f06b7716b86a3e502becb21b28201f2"
+      "sha256": "f3f3a9e8cec02cba219a1e7deef363f9f5f3a300aa25b7e70597a8f609108b8e"
     },
     {
-      "path": "src/config/services.ts",
-      "sha256": "26ff73723b4c93ffa62ea9ce479187c37ce384732eca7c637914d4a0f95d1166"
+      "path": "src/config/native-services.ts",
+      "sha256": "ccf34ee39d89aa0d928033517a8469f455e3353f22026053d6444597b1690a62"
+    },
+    {
+      "path": "src/config/native-state.ts",
+      "sha256": "55b3792dcba242fa0f61429fe0af4cbe5d04bdb761af2a79eb6697a22664e0da"
+    },
+    {
+      "path": "src/config/native-templates.ts",
+      "sha256": "1e56f4c9038e0979ceb88f194ad32131a8b95f41e0f1afb0928af595a8ecf94f"
     },
     {
       "path": "src/runtime/render-compose.ts",
-      "sha256": "7c378014834eac4f2de9833fabba868c3ef120db9b6dbd7592366de161f41abe"
+      "sha256": "28bc4cd4c928b933fe57c50a7ec7863cedbad28ba12d4e5849bb0ef71d2ea4fc"
     },
     {
       "path": "src/setup/questions.ts",
-      "sha256": "42efcfe122990f64d0bc92a3fed0a32766568b1fa9862ba223907769ac998119"
+      "sha256": "b5178e7cd8d21d6f1b23e776ffcdc4e59db70b3514ac56ddafbf6b946710675f"
     },
     {
       "path": "src/setup/server.ts",
-      "sha256": "477c01b9d51bfb88651add69832949c00f78765bdc021af191c605df97a7af26"
+      "sha256": "f0ea875eb0ad9c589edb020138250dfd7a4807d1f944a90f9ed0b36e7afc2046"
     },
     {
       "path": "src/config/providers.ts",
@@ -37,31 +45,19 @@
     },
     {
       "path": "src/runtime/mcp-gateway.ts",
-      "sha256": "cdbc30a5fe9227b047a46efb46fab03ca9c4126e6ee251593dea79cc22848f71"
-    },
-    {
-      "path": "src/runtime/mcp-workers.ts",
-      "sha256": "589e93b037f1fbad54b0865f86b96c602daf519c1d9b5e3ccd07a38e2aecfed1"
-    },
-    {
-      "path": "deploy/locks/mcp/bind-loopback.mjs",
-      "sha256": "fcd166622daed0eb7e026c5f17494963c20d5c794ffc6b2adb3b240c03b74a88"
-    },
-    {
-      "path": "src/runtime/mcp-adapter.ts",
-      "sha256": "5a739945f4450e9d48c3f70390d305934e674bbbfdfc40a144e04567c30531fc"
-    },
-    {
-      "path": "src/runtime/user-auth.ts",
-      "sha256": "297f98058e3aa8199c7f117d85400a9d8189cbe742fc8f6c72ba0cefde6127b0"
+      "sha256": "92a81e074d09ef855d6ea69d8272773e95678be0e5ae90b908625d0c3ac1948f"
     },
     {
       "path": "src/runtime/access-gateway.ts",
-      "sha256": "7aec52370dbbda330020bd25e4f8321ff564357db50d02cecd265c405cf1a521"
+      "sha256": "eb1187fa789a6dd5206b20c83d01425feab9f572a6a0df269dd50a9b9ae23530"
     },
     {
-      "path": "src/runtime/knowledge-service.ts",
-      "sha256": "f016b30a98053687553b9eb6988ad68e067262cece4af35f22b8dcbd258ec221"
+      "path": "src/runtime/user-auth.ts",
+      "sha256": "4e263c26c6fda78f615f4f94b1246878a9201e68f229b92464482660aa76285e"
+    },
+    {
+      "path": "deploy/node.Dockerfile",
+      "sha256": "d373ecc057a68c55ee856cc04b412582198974dcb26343145518181ad8f51c6b"
     }
   ]
 }

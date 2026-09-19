@@ -101,7 +101,7 @@
       "id": "mcp",
       "type": "security",
       "label": "AMS MCP gateway",
-      "sublabel": "Streamable HTTP /mcp",
+      "sublabel": "SDK HTTP ↔ stock stdio MCP",
       "tag": "127.0.0.1:8425",
       "pos": [
         371,
@@ -115,7 +115,7 @@
     {
       "id": "access",
       "type": "security",
-      "label": "Knowledge access",
+      "label": "AMS access bridge",
       "sublabel": "User + team + resource ACL",
       "pos": [
         732,
@@ -247,26 +247,26 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "Choose one model route",
+      "title": "One full stack",
       "items": [
-        "Fresh stacks share CLIProxyAPI; an external API is optional.",
-        "Core and Knowledge choose separate models; agents choose their own."
+        "All six applications run together with config/bootstrap/access helpers.",
+        "Core and Knowledge use CLIProxyAPI or an external model API."
       ]
     },
     {
       "dot": "emerald",
-      "title": "Two agent connections",
+      "title": "Stock TDAI",
       "items": [
-        "MemoryProxy adds memory. MCP supplies Knowledge tools.",
-        "Use localhost or Caddy domains; preserve request paths."
+        "MemoryProxy, Core, Knowledge and Panel run unchanged upstream code.",
+        "Panel talks directly to Knowledge; Knowledge calls back to Panel."
       ]
     },
     {
       "dot": "violet",
-      "title": "Configure, then apply",
+      "title": "Native configuration",
       "items": [
-        "Save without models; apply signs in and asks for missing choices.",
-        "Existing external settings stay external until you opt in."
+        "Upstream defaults + user overrides live in ~/.config/agent-memory-stack.",
+        "Configure selects models. Apply composes saved files and mounts them."
       ]
     }
   ]

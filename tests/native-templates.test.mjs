@@ -58,6 +58,13 @@ test('initial native preparation downloads only the selected archive and writes 
   await saveNativeConfiguration(directory, candidate);
   assert.deepEqual((await readdir(join(root, 'defaults'))).sort(), [...nativeFileNames].sort());
   for (const name of nativeFileNames) assert.equal(await readFile(join(root, 'defaults', name), 'utf8'), fixture.files[name]);
+  await assert.rejects(readFile(join(root, '.ams-state.json')), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await readFile(join(directory, '.ams/native-config.json'), 'utf8')), {
+    version: 1, root, originsFinalized: true,
+  });
+  const backup = JSON.parse(await captureNativeConfiguration(directory));
+  assert.equal(Object.hasOwn(backup, 'state'), false);
+  assert.equal(Object.hasOwn(backup, 'originsFinalized'), false);
   await assert.rejects(readdir(join(directory, '.ams/native-templates')), { code: 'ENOENT' });
   assert.deepEqual(await readFile(archivePath(directory, fixture.source)), fixture.bytes);
 });
@@ -102,17 +109,20 @@ test('download integrity failure cannot replace the current defaults', async t =
 });
 
 
-test('active source selection and native defaults cannot silently diverge', async t => {
+test('ordinary preparation preserves operator defaults and explicit source replacement installs new defaults', async t => {
   const directory = await temporary(t);
   const initial = await installNativeSourceFixture(directory);
   await saveNativeConfiguration(directory, await prepareNativeConfiguration(directory, {}, { root: join(directory, 'native') }));
   const next = createNativeSourceFixture({ revision: 'b'.repeat(40), files: { 'core.yaml': '# new selected source\nnewOption: true\n' } });
   await installNativeSourceFixture(directory, next);
   t.mock.method(globalThis, 'fetch', () => assert.fail('both selected archives are cached'));
-  const candidate = await prepareNativeConfiguration(directory, {});
-  assert.deepEqual(candidate.source, next.source);
-  assert.deepEqual(candidate.defaults, next.files);
-  assert.notDeepEqual(candidate.defaults, initial.files);
-  await saveNativeConfiguration(directory, candidate);
-  assert.deepEqual(JSON.parse(await captureNativeConfiguration(directory)).state.source, next.source);
+  const ordinary = await prepareNativeConfiguration(directory, {});
+  assert.deepEqual(ordinary.source, next.source);
+  assert.deepEqual(ordinary.defaults, initial.files);
+  await saveNativeConfiguration(directory, ordinary);
+  const replacement = await prepareNativeConfiguration(directory, {}, { source: next.source });
+  assert.deepEqual(replacement.defaults, next.files);
+  assert.notDeepEqual(replacement.defaults, initial.files);
+  await saveNativeConfiguration(directory, replacement);
+  assert.deepEqual(JSON.parse(await captureNativeConfiguration(directory)).defaults, next.files);
 });

@@ -5119,8 +5119,8 @@
         <text data-detail="context" x="1215.5" y="398" class="t-muted" font-size="9" text-anchor="middle">Configuration: choose ONE route</text>
         </g>
 
-        <g id="node-mcp" data-node-id="mcp" data-node-label="AMS MCP gateway" tabindex="0" role="button" aria-label="Focus AMS MCP gateway, Streamable HTTP /mcp, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="Streamable HTTP /mcp" data-node-tag="127.0.0.1:8425" data-node-context="Architecture component">
-          <title>AMS MCP gateway · Streamable HTTP /mcp · Architecture component · 127.0.0.1:8425</title>
+        <g id="node-mcp" data-node-id="mcp" data-node-label="AMS MCP gateway" tabindex="0" role="button" aria-label="Focus AMS MCP gateway, SDK HTTP ↔ stock stdio MCP, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="SDK HTTP ↔ stock stdio MCP" data-node-tag="127.0.0.1:8425" data-node-context="Architecture component">
+          <title>AMS MCP gateway · SDK HTTP ↔ stock stdio MCP · Architecture component · 127.0.0.1:8425</title>
           <rect x="371" y="650" width="235" height="88" rx="6" class="c-mask"/>
           <rect x="371" y="650" width="235" height="88" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(377 656) scale(0.6875)">
@@ -5128,19 +5128,19 @@
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="488.5" y="692" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">AMS MCP gateway</text>
-        <text data-detail="context" x="488.5" y="708" class="t-muted" font-size="9" text-anchor="middle">Streamable HTTP /mcp</text>
+        <text data-detail="context" x="488.5" y="708" class="t-muted" font-size="9" text-anchor="middle">SDK HTTP ↔ stock stdio MCP</text>
         <text data-detail="fine" x="488.5" y="730" class="t-security" font-size="7" text-anchor="middle">127.0.0.1:8425</text>
         </g>
 
-        <g id="node-access" data-node-id="access" data-node-label="Knowledge access" tabindex="0" role="button" aria-label="Focus Knowledge access, User + team + resource ACL, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="User + team + resource ACL" data-node-context="Architecture component">
-          <title>Knowledge access · User + team + resource ACL · Architecture component</title>
+        <g id="node-access" data-node-id="access" data-node-label="AMS access bridge" tabindex="0" role="button" aria-label="Focus AMS access bridge, User + team + resource ACL, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="User + team + resource ACL" data-node-context="Architecture component">
+          <title>AMS access bridge · User + team + resource ACL · Architecture component</title>
           <rect x="732" y="650" width="245" height="88" rx="6" class="c-mask"/>
           <rect x="732" y="650" width="245" height="88" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(738 656) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="854.5" y="692" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Knowledge access</text>
+          <text data-node-label="" data-detail-anchor="" x="854.5" y="692" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">AMS access bridge</text>
         <text data-detail="context" x="854.5" y="708" class="t-muted" font-size="9" text-anchor="middle">User + team + resource ACL</text>
         </g>
 
@@ -5429,33 +5429,33 @@
       <div class="card">
         <div class="card-header">
           <div class="card-dot cyan"></div>
-          <h3>Choose one model route</h3>
+          <h3>One full stack</h3>
         </div>
         <ul>
-          <li>&bull; Fresh stacks share CLIProxyAPI; an external API is optional.</li>
-          <li>&bull; Core and Knowledge choose separate models; agents choose their own.</li>
+          <li>&bull; All six applications run together with config/bootstrap/access helpers.</li>
+          <li>&bull; Core and Knowledge use CLIProxyAPI or an external model API.</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot emerald"></div>
-          <h3>Two agent connections</h3>
+          <h3>Stock TDAI</h3>
         </div>
         <ul>
-          <li>&bull; MemoryProxy adds memory. MCP supplies Knowledge tools.</li>
-          <li>&bull; Use localhost or Caddy domains; preserve request paths.</li>
+          <li>&bull; MemoryProxy, Core, Knowledge and Panel run unchanged upstream code.</li>
+          <li>&bull; Panel talks directly to Knowledge; Knowledge calls back to Panel.</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot violet"></div>
-          <h3>Configure, then apply</h3>
+          <h3>Native configuration</h3>
         </div>
         <ul>
-          <li>&bull; Save without models; apply signs in and asks for missing choices.</li>
-          <li>&bull; Existing external settings stay external until you opt in.</li>
+          <li>&bull; Upstream defaults + user overrides live in ~/.config/agent-memory-stack.</li>
+          <li>&bull; Configure selects models. Apply composes saved files and mounts them.</li>
         </ul>
       </div>
     </div>

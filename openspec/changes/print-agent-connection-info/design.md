@@ -1,3 +1,5 @@
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## Context
 
 See proposal.md for motivation. The CLI has explicit Configure stack, Apply configuration, and Show connection details menu items in `src/cli/run.ts`; `src/cli/commands.ts` retains `ams apply`. Remembered installation paths and environment parsing already exist. The connection presenter and server MCP transport are implemented; this revision groups saved addresses and matching credentials by service.

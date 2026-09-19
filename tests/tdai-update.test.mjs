@@ -27,7 +27,7 @@ async function installation(t, env = coreEnv) {
 
 test('TDAI update stages the branch commit and downloaded digest only in the installation', async t => {
   const directory = await installation(t);
-  const packagedBefore = await readFile(join(packageRoot, 'upstream.lock.json'), 'utf8');
+  const packagedBefore = await readFile(join(packageRoot, 'vendor/upstream.lock.json'), 'utf8');
   const packaged = JSON.parse(packagedBefore);
   const requests = [];
   const result = await updateTdai(directory, { fetchImpl: async (address, options) => {
@@ -47,7 +47,7 @@ test('TDAI update stages the branch commit and downloaded digest only in the ins
   await assert.rejects(readFile(join(directory, '.ams/native-templates', revision, 'core.yaml')), { code: 'ENOENT' });
   assert.deepEqual(effective.sources.cliproxy, packaged.sources.cliproxy);
   assert.deepEqual(effective.images, packaged.images);
-  assert.equal(await readFile(join(packageRoot, 'upstream.lock.json'), 'utf8'), packagedBefore);
+  assert.equal(await readFile(join(packageRoot, 'vendor/upstream.lock.json'), 'utf8'), packagedBefore);
   const snapshot = JSON.parse(await readFile(join(directory, '.ams/before-save.json'), 'utf8'));
   assert.equal(snapshot['.env'], encodeEnv(coreEnv));
   assert.equal(snapshot['.ams/tdai-source.json'], null);

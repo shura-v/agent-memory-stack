@@ -21,11 +21,11 @@ The examples use Bash or Zsh (macOS, Linux, or WSL) and an already installed `co
 
 ## Get your endpoints and key
 
-On the stack machine, run `ams` → **Show connection details** to find Panel, MemoryProxy, and MCP.
+On the stack machine, run `ams` → **Show connection details**. The final **Agent connections** section, after the visible separator, contains MemoryProxy and MCP addresses with user keys and a link back to these guides. Panel and internal service details appear above it.
 
 In **Panel → API Keys → Client Access Endpoint**, copy the **Codex** or **Claude Code** endpoint for your instance. Use your saved **memory-user API key**, or create a key while signed in as the intended user and copy the full value when it is shown. Existing key rows display only a prefix.
 
-Use the user key for both connections. The Panel administrator key and the Core/CLIProxyAPI service keys serve different purposes.
+Use the user key for both connections. The Panel administrator key, native MemoryProxy `admin.apiKey`, and Core/CLIProxyAPI service keys serve different purposes.
 
 | Where the agent runs | Address to use |
 | --- | --- |
@@ -59,6 +59,8 @@ Repeat this in each new terminal, or supply `AMS_USER_API_KEY` through your own 
 ## Check your first session
 
 Start your agent with its configured profile, complete memory initialization, and send a short request. Confirm the session appears in Panel. If you also enabled MCP, check it separately: a working model connection alone does not verify Knowledge access.
+
+AMS runs the selected TDAI revision unchanged and leaves Core service authentication unset by default; it does not generate Core `server.apiKey`. MemoryProxy still verifies your Core user key. If you explicitly configure a Core service key, the pinned Proxy omits its service Bearer during user verification and can fail with HTTP 401. The separate AMS MCP access boundary supports the configured service credential and retains user/resource checks. Check both connections independently; healthy containers do not establish successful inference. See [native authentication settings](../native-configs.md#core-service-authentication) and [validation and known limits](../../VALIDATION.md).
 
 | Symptom | Check |
 | --- | --- |

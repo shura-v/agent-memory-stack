@@ -1,10 +1,10 @@
-> Synchronized with the current main specification on 2026-09-19. Overlapping requirements reflect the final stock-TDAI contract; prior design narratives remain historical. Archive this already-synchronized change without applying its deltas again.
+# stock-tdai-integration Specification
 
 ## Purpose
 
 Run a selected TDAI revision unchanged, with native configuration and an external AMS transport boundary rather than a locally maintained application fork.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Unmodified TDAI delivery
 

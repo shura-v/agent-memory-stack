@@ -1,9 +1,10 @@
-import { chmod, lstat, mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atomicWrite } from '../config/files.js';
-import { validateNativeConfiguration } from '../config/native-state.js';
+import { validateNativeConfiguration, validateNativeReference } from '../config/native-state.js';
 import { validateDeploymentImages } from '../build/images.js';
+import { validateTdaiSource } from '../build/sources.js';
 import { nativeFileNames } from '../config/native-templates.js';
 
 // This is the input record consumed by server-settings.restoreSnapshotInputs.
@@ -35,20 +36,20 @@ export async function restoreNativeSnapshot(directory: string, snapshot: string)
     for (const name of ['pending-tdai-source.json', 'pending-images.json', 'before-save.json', 'apply-pending']) await rm(join(directory, '.ams', name), { recursive: true, force: true });
   };
   let saved: unknown;
-  let reference;
+  let reference: unknown;
   try { saved = JSON.parse(raw); reference = JSON.parse(restoredInputs['.ams/native-config.json'] ?? 'null'); } catch { throw new Error('Invalid native configuration snapshot'); }
-  validateNativeConfiguration(saved, directory);
-  if (reference?.version !== 1 || reference.root !== saved.root) throw new Error('Invalid native configuration snapshot reference');
+  validateNativeReference(reference);
+  const backup = saved as { root?: unknown };
+  if (!backup || typeof backup !== 'object' || reference.root !== backup.root) throw new Error('Invalid native configuration snapshot reference');
+  const configuration = { ...backup, originsFinalized: reference.originsFinalized };
+  validateNativeConfiguration(configuration);
   const source = restoredInputs['.ams/tdai-source.json'];
   const images = restoredInputs['.ams/images.json'];
   if (!source || !images) throw new Error('Native configuration snapshot is missing source or image records');
-  const selected = JSON.parse(source);
-  if (['revision', 'url', 'sha256'].some(key => selected[key] !== saved.state.source[key as keyof typeof saved.state.source])) throw new Error('Native configuration snapshot does not match its source record');
+  validateTdaiSource(JSON.parse(source));
   validateDeploymentImages(JSON.parse(images));
 
-  // Validate all destinations before replacing either visible set. An occupied
-  // root must already be associated with this runtime; snapshot ownership alone
-  // does not authorize adopting unrelated files.
+  // Validate all destinations before replacing either visible set.
   const assertDirectory = async (path: string): Promise<boolean> => {
     try {
       const info = await lstat(path);
@@ -56,33 +57,26 @@ export async function restoreNativeSnapshot(directory: string, snapshot: string)
       return true;
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
   };
-  if (await assertDirectory(saved.root)) {
-    const existing = await optional(join(saved.root, '.ams-state.json'));
-    if ((await readdir(saved.root)).length) {
-      const activeReference = await optional(join(directory, '.ams/native-config.json'));
-      if (!existing || JSON.parse(existing).runtime !== directory || !activeReference || JSON.parse(activeReference).root !== saved.root) throw new Error('Native restore root is occupied or unassociated with this installation');
-    }
-  }
+  await assertDirectory(configuration.root);
   for (const set of ['defaults', 'overrides']) {
-    await assertDirectory(join(saved.root, set));
-    for (const name of [...nativeFileNames, ...(set === 'overrides' ? ['deletions.json'] : [])]) await optional(join(saved.root, set, name));
+    await assertDirectory(join(configuration.root, set));
+    for (const name of [...nativeFileNames, ...(set === 'overrides' ? ['deletions.json'] : [])]) await optional(join(configuration.root, set, name));
   }
-  await mkdir(saved.root, { recursive: true, mode: 0o700 });
-  await chmod(saved.root, 0o700);
+  await mkdir(configuration.root, { recursive: true, mode: 0o700 });
+  await chmod(configuration.root, 0o700);
   for (const set of ['defaults', 'overrides'] as const) {
-    await mkdir(join(saved.root, set), { recursive: true, mode: 0o700 });
-    await chmod(join(saved.root, set), 0o700);
+    await mkdir(join(configuration.root, set), { recursive: true, mode: 0o700 });
+    await chmod(join(configuration.root, set), 0o700);
     for (const name of nativeFileNames) {
-      const text = saved[set][name];
-      if (text === undefined) await rm(join(saved.root, set, name), { force: true });
-      else await atomicWrite(join(saved.root, set, name), text);
+      const text = configuration[set][name];
+      if (text === undefined) await rm(join(configuration.root, set, name), { force: true });
+      else await atomicWrite(join(configuration.root, set, name), text);
     }
   }
-  if (saved.deletions === undefined) await rm(join(saved.root, 'overrides/deletions.json'), { force: true });
-  else await atomicWrite(join(saved.root, 'overrides/deletions.json'), saved.deletions);
-  await atomicWrite(join(saved.root, '.ams-state.json'), JSON.stringify(saved.state, null, 2) + '\n');
+  if (configuration.deletions === undefined) await rm(join(configuration.root, 'overrides/deletions.json'), { force: true });
+  else await atomicWrite(join(configuration.root, 'overrides/deletions.json'), configuration.deletions);
   await mkdir(join(directory, '.ams'), { recursive: true, mode: 0o700 });
-  await atomicWrite(join(directory, '.ams/native-config.json'), JSON.stringify({ version: 1, root: saved.root }, null, 2) + '\n');
+  await atomicWrite(join(directory, '.ams/native-config.json'), restoredInputs['.ams/native-config.json']!);
   await finishRestore();
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

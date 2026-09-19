@@ -1,3 +1,5 @@
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## Context
 
 See `proposal.md` for motivation. Current `serviceConfigs` passes `LLM_BASE_URL` and `LLM_API_KEY` unchanged to Core and Knowledge, so routing both through `http://cli-proxy-api:8317/v1` already works at the configuration level. Each consumer retains its own model setting. CLIProxyAPI exposes the OpenAI-compatible protocol used by those consumers.

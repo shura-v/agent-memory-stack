@@ -43,7 +43,8 @@ export function seedNativeServiceConfigs(input: Settings, templates: NativeServi
     result[name] = updateNativeDocument(template, name.endsWith('.yaml') ? 'yaml' : name.endsWith('.env') ? 'env' : 'json', edits(values));
   };
   set('core.yaml', {
-    deployMode: 'standalone', instanceId: 'ams', 'server.host': '0.0.0.0', 'server.port': 8420, 'server.apiKey': env.CORE_API_KEY ?? '',
+    deployMode: 'standalone', instanceId: 'ams', 'server.host': '0.0.0.0', 'server.port': 8420,
+    ...(input.CORE_API_KEY === undefined ? {} : { 'server.apiKey': input.CORE_API_KEY }),
     'observability.langfuse.enabled': false,
     'data.baseDir': '/data/memory', 'metadata.store.sqliteBaseDir': '/data/metadata',
     'llm.provider': 'openai', 'llm.baseUrl': llm.baseURL, 'llm.apiKey': llm.apiKey, 'llm.model': env.MEMORY_LLM_MODEL ?? '',
@@ -64,9 +65,11 @@ export function seedNativeServiceConfigs(input: Settings, templates: NativeServi
       'injection.enabled': true, 'injection.injectors': ['skill', 'knowledge', 'tdai-memory'],
       'injection.externalGatewayUrl': publicProxy, 'injection.assetReflection.markerOptIn': false,
       'extraction.enabled': true, 'extraction.extractors': ['skill', 'tdai-memory'], 'sessionInit.skipAssetConfirm': true,
-      'tdai.enabled': true, 'tdai.endpoint': core.endpoint ?? '', 'tdai.apiKey': core.key ?? '', 'tdai.serviceId': 'ams',
-      'skill.endpoint': core.endpoint ?? '', 'skill.serviceToken': core.key ?? '', 'skill.serviceId': 'ams',
-      'knowledge.enabled': true, 'knowledge.endpoint': core.endpoint ?? '', 'knowledge.serviceToken': core.key ?? '', 'knowledge.serviceId': 'ams',
+      'tdai.enabled': true, 'tdai.endpoint': core.endpoint ?? '', 'tdai.serviceId': 'ams',
+      'skill.endpoint': core.endpoint ?? '', 'skill.serviceId': 'ams',
+      'knowledge.enabled': true, 'knowledge.endpoint': core.endpoint ?? '', 'knowledge.serviceId': 'ams',
+      // Stock data-plane clients still require a nonempty Bearer when Core has no shared secret.
+      ...(core.key ? { 'tdai.apiKey': core.key, 'skill.serviceToken': core.key, 'knowledge.serviceToken': core.key } : {}),
     });
   }
   set('knowledge.env', {
@@ -79,10 +82,11 @@ export function seedNativeServiceConfigs(input: Settings, templates: NativeServi
   });
   set('panel.env', {
     HOST: '0.0.0.0', PORT: '8123', LOG_LEVEL: env.LOG_LEVEL, LOG_FORMAT: 'json', METADATA_INSTANCES_CONFIG: '/config/panel-instances.json',
-    KNOWLEDGE_SERVICE_URL: knowledge.endpoint ?? '', KNOWLEDGE_LLM_BINDING_SYNC: 'false', KNOWLEDGE_AUTH_TOKEN: core.key ?? '',
+    KNOWLEDGE_SERVICE_URL: knowledge.endpoint ?? '', KNOWLEDGE_LLM_BINDING_SYNC: 'false',
+    ...(core.key ? { KNOWLEDGE_AUTH_TOKEN: core.key } : {}),
     TDAI_AGENT_TEMPLATE_DIR: '/data/templates',
   });
-  set('panel-instances.json', { instances: [{ id: 'ams', name: 'Agent Memory Stack', gateway_endpoint: core.endpoint ?? '', api_key: core.key ?? '', ...(publicProxy ? { proxy_endpoint: publicProxy } : {}) }] });
+  set('panel-instances.json', { instances: [{ id: 'ams', name: 'Agent Memory Stack', gateway_endpoint: core.endpoint ?? '', api_key: core.key || 'local', ...(publicProxy ? { proxy_endpoint: publicProxy } : {}) }] });
   return result;
 }
 

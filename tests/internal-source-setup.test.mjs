@@ -275,7 +275,6 @@ test('Configure during a pending update edits active defaults and Apply activate
   });
   const saved = await readNativeConfiguration(directory);
   assert.deepEqual(saved.defaults, before.defaults);
-  assert.deepEqual(saved.state.source, before.state.source);
   assert.equal(await readFile(join(directory, '.ams/tdai-source.json'), 'utf8'), activeSource);
   assert.equal(await readFile(join(directory, '.ams/images.json'), 'utf8'), activeImages);
   assert.equal((await readEnv(join(directory, '.env'))).MEMORY_LLM_MODEL, 'configured-memory');
@@ -284,7 +283,7 @@ test('Configure during a pending update edits active defaults and Apply activate
   assert.deepEqual(ui.asked, []);
   const activated = await readNativeConfiguration(directory);
   assert.deepEqual(activated.defaults, templates.files);
-  assert.deepEqual(activated.state.source, source);
+  assert.deepEqual(JSON.parse(await readFile(join(directory, '.ams/tdai-source.json'), 'utf8')), source);
   assert.deepEqual(JSON.parse(await readFile(join(directory, '.ams/images.json'), 'utf8')), upgradedImages);
   const applied = JSON.parse(await readFile(join(directory, '.ams/last-applied-inputs.json'), 'utf8'));
   assert.deepEqual(JSON.parse(applied['.ams/native-backup.json']).defaults, templates.files);
@@ -323,6 +322,6 @@ test('fresh save-only Configure downloads selected templates without running an 
   assert.deepEqual(requested, [fixture.source.url]);
   const saved = await readNativeConfiguration(directory);
   assert.deepEqual(saved.defaults, fixture.files);
-  assert.deepEqual(saved.state.source, fixture.source);
+  assert.deepEqual(JSON.parse(await readFile(join(directory, '.ams/tdai-source.json'), 'utf8')), fixture.source);
   assert.equal((await readEnv(join(directory, '.env'))).MEMORY_LLM_MODEL, external.MEMORY_LLM_MODEL);
 });

@@ -24,7 +24,7 @@ function fixture(options = {}) {
     const endpoint = url.pathname;
     const body = JSON.parse(request.body);
     state.calls.push({ endpoint, body });
-    assert.equal(request.headers.authorization, 'Bearer gateway-key');
+    assert.equal(request.headers.authorization, options.withoutServiceKey ? undefined : 'Bearer gateway-key');
     assert.equal(request.headers['x-tdai-service-id'], 'ams');
     assert.equal(request.redirect, 'error');
     if (endpoint === '/v3/internal/meta/user/list-by-instance') {
@@ -245,4 +245,11 @@ test('CLI environment load failure is sanitized before initialization', async (t
   assert.equal(execution.code, 1);
   assert.ok(!execution.stderr.includes(KEY));
   assert.equal(f.state.calls.length, 0);
+});
+
+test('initialization and readiness work without a Core service key while checking the user key', async () => {
+  const f = fixture({ withoutServiceKey: true });
+  assert.deepEqual(await f.run({ coreApiKey: undefined }), result(true));
+  assert.equal(f.state.calls.find(call => call.endpoint.endsWith('/auth/verify')).body.user_key, KEY);
+  assert.deepEqual(await f.run({ coreApiKey: '', mode: 'check', adminKey: undefined }), { initialized: true, created: false, userId: USER.user_id });
 });

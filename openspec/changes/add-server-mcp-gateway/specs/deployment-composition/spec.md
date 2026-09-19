@@ -1,28 +1,17 @@
+> Synchronized with the current main specification on 2026-09-19. Overlapping requirements reflect the final stock-TDAI contract; prior design narratives remain historical. Archive this already-synchronized change without applying its deltas again.
+
 ## MODIFIED Requirements
 
-### Requirement: Explainable local service selection
+### Requirement: Fixed complete local service composition
 
-Choosing Configure stack in `ams` SHALL enter stack setup without a service-selection question. A fresh installation SHALL configure the complete implemented local stack, including MCP and its required support services when this change is implemented. Existing explicit service selection and dependency modes SHALL remain authoritative, including installations without MCP. Advanced service selection SHALL remain editable through `.env`; setup SHALL display the resulting topology without asking the operator to choose services. Missing or invalid advanced settings SHALL produce actionable configuration guidance.
+Configure stack SHALL always configure Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI and MCP together with their three required support containers. Setup SHALL display this fixed composition without service-selection questions. Service selection, dependency placement and disabled-service modes SHALL NOT be configurable through orchestration settings. Removed service-selection and remote-placement fields SHALL NOT control deployment composition or trigger a conversion.
 
-#### Scenario: Accept a complete local stack
-- **WHEN** the operator configures a fresh installation after MCP is implemented
-- **THEN** setup derives Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI, MCP, and required support services for one Compose project without displaying service checkboxes
+#### Scenario: Configure the complete local stack
+- **WHEN** the operator configures a fresh installation or reapplies saved settings
+- **THEN** all six application services and their support containers belong to one local Compose project
+- **AND** setup offers both internal LLM source choices independently of service composition
 
-#### Scenario: No local services selected
-- **WHEN** an explicit saved selection is empty
-- **THEN** setup reports an invalid AMS_SERVICES value to correct in .env without opening a checkbox prompt or changing running services
-
-#### Scenario: Proceed directly to installation
-- **WHEN** the operator chooses Configure stack
-- **THEN** setup asks installation and provider questions without service-selection or local-action prompts
-- **AND** local Core retains its administrator initialization flow and saved configuration remains applicable through the existing command
-
-#### Scenario: Enable MCP with split dependencies
-- **WHEN** an existing or manually edited configuration enables MCP with remote dependencies
-- **THEN** setup reads its Core and protected Knowledge dependencies from .env, resolves its host port automatically during apply, and does not ask for topology, addresses, or ports
-- **AND** missing required configuration prevents application with guidance to edit .env
-
-#### Scenario: Preserve an existing installation
-- **WHEN** setup reads an existing explicit service selection without MCP
-- **THEN** it preserves that selection, identities, credentials, and preferred ports instead of enabling extra services
-- **AND** the operator can add MCP through .env and apply the saved configuration
+#### Scenario: Reject removed deployment controls
+- **WHEN** orchestration settings include AMS_SERVICES, AMS_DEPLOYMENT_VERSION, placement-mode or REMOTE_* fields
+- **THEN** the installation retains its fixed complete local composition
+- **AND** no migration, subset deployment or remote replacement is inferred

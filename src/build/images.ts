@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { buildContext, fetchSources, loadSourceLock, packageRoot } from './sources.js';
-import { buildFingerprint, buildFingerprintLabel, contextPackageJson } from './fingerprint.js';
+import { buildFingerprint, buildFingerprintLabel } from './fingerprint.js';
 
 export const imageServices = ['core', 'knowledge', 'panel', 'memory-proxy', 'cli-proxy-api', 'mcp', 'runtime'] as const;
 export type ImageService = typeof imageServices[number];
@@ -54,14 +54,15 @@ export async function writeImageManifest(projectDir: string, manifest: ImageMani
 export async function prepareBuildContext(projectDir: string): Promise<string> {
   const context = buildContext(projectDir);
   await mkdir(context, { recursive: true });
-  for (const resource of ['deploy', 'dist/runtime', 'dist/config', 'dist/build', 'dist/deployment']) {
+  for (const resource of ['deploy', 'vendor', 'package.json', 'dist/runtime', 'dist/config', 'dist/build', 'dist/deployment']) {
     await rm(resolve(context, resource), { recursive: true, force: true });
     await cp(resolve(packageRoot, resource), resolve(context, resource), {
       recursive: true, filter: source => !resource.startsWith('dist/') || !source.endsWith('.map'),
     });
   }
-  await writeFile(resolve(context, 'package.json'), contextPackageJson);
-  await writeFile(resolve(context, '.dockerignore'), '**\n!deploy/\n!deploy/**\n!dist/\n!dist/runtime/\n!dist/runtime/**\n!dist/config/\n!dist/config/**\n!dist/build/\n!dist/build/**\n!dist/deployment/\n!dist/deployment/**\n!package.json\n!.cache/\n!.cache/upstream/\n!.cache/upstream/tencent/\n!.cache/upstream/tencent/**\n!.cache/upstream/cliproxy/\n!.cache/upstream/cliproxy/**\n');
+  // npm excludes the root lock from packages; build ships an exact copy in dist.
+  await cp(resolve(packageRoot, 'dist/build/package-lock.json'), resolve(context, 'package-lock.json'));
+  await writeFile(resolve(context, '.dockerignore'), '**\n!deploy/\n!deploy/**\n!vendor/\n!vendor/**\n!dist/\n!dist/runtime/\n!dist/runtime/**\n!dist/config/\n!dist/config/**\n!dist/build/\n!dist/build/**\n!dist/deployment/\n!dist/deployment/**\n!package.json\n!package-lock.json\n!.cache/\n!.cache/upstream/\n!.cache/upstream/tencent/\n!.cache/upstream/tencent/**\n!.cache/upstream/cliproxy/\n!.cache/upstream/cliproxy/**\n');
   return context;
 }
 

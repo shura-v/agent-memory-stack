@@ -118,14 +118,14 @@
         <div class="cards">
           <a class="card" href="architecture/stack.html">
             <span class="card-label">The big picture</span>
-            <h3>Stack overview (historical snapshot)</h3>
-            <p>See how agent inference, memory and Knowledge share CLIProxyAPI by default, with a separate external model API as an alternative.</p>
+            <h3>Stack overview</h3>
+            <p>Explore the complete stack, unchanged TDAI services, and the choice of CLIProxyAPI or an external API for internal models.</p>
             <span class="card-action">Explore the stack <span aria-hidden="true">→</span></span>
           </a>
           <a class="card" href="architecture/mcp.html">
             <span class="card-label">A closer look</span>
-            <h3>Inside the MCP bridge (historical snapshot)</h3>
-            <p>Follow the connection from your agent to Knowledge tools, with access scoped to your users and resources.</p>
+            <h3>Inside the MCP bridge</h3>
+            <p>Follow authenticated HTTP through the official MCP SDK to TDAI's stock stdio tools, with a separate process for each HTTP POST.</p>
             <span class="card-action">Explore MCP <span aria-hidden="true">→</span></span>
           </a>
         </div>
@@ -138,10 +138,12 @@
 
       <section aria-labelledby="setup-title">
         <h2 id="setup-title">Set up your stack</h2>
-        <figure>
-          <img src="images/agent-memory-stack-setup.gif" alt="Agent Memory Stack setup walkthrough in the terminal." loading="lazy">
-          <figcaption>Configure your stack with the interactive AMS wizard.</figcaption>
-        </figure>
+        <ol>
+          <li>Run <code>ams</code> and select <strong>Configure stack</strong>. Choose the model source and the Core and Knowledge models.</li>
+          <li>Keep upstream templates in <code>~/.config/agent-memory-stack/defaults/</code> and your settings in <code>overrides/</code>. Configure fills the settings it knows; you control the remaining native options.</li>
+          <li>Run <code>ams apply</code> to apply the saved files and start the complete stack. Use <strong>Show connection details</strong> for addresses and credentials.</li>
+        </ol>
+        <p>TDAI updates refresh the upstream defaults while preserving your overrides. AMS supplies configuration and transport integration; TDAI runs with its native behavior.</p>
       </section>
 
       <nav class="guides" aria-labelledby="guides-title">
@@ -149,6 +151,8 @@
         <div class="guide-links">
           <a href="https://github.com/shura-v/agent-memory-stack/blob/main/README.md">Quick start</a>
           <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/operations.md">Setup and operations</a>
+          <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/native-configs.md">Defaults and overrides</a>
+          <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/updating-tdai.md">Update TDAI</a>
           <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/agent-profiles/README.md">Connect Codex, Claude Code, and Hermes</a>
           <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/caddy.md">Publish through Caddy</a>
           <a href="https://github.com/shura-v/agent-memory-stack/blob/main/docs/development.md">Development guide</a>

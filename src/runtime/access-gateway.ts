@@ -28,9 +28,8 @@ export function gatewayConfig(env: NodeJS.ProcessEnv = process.env): GatewayConf
       throw new Error('Invalid internal service URL');
     }
   }
-  if (!env.CORE_API_KEY) throw new Error('CORE_API_KEY is required');
   if (env.TDAI_SERVICE_ID && env.TDAI_SERVICE_ID !== 'ams') throw new Error('TDAI_SERVICE_ID must be ams');
-  return { coreUrl, knowledgeUrl, coreApiKey: env.CORE_API_KEY,
+  return { coreUrl, knowledgeUrl, coreApiKey: env.CORE_API_KEY ?? '',
     serviceId: env.TDAI_SERVICE_ID || 'ams', bodyLimit: 256 * 1024, timeoutMs: 10_000 };
 }
 
@@ -86,7 +85,8 @@ export function createGatewayHandler(config: GatewayConfig, fetcher: typeof fetc
       const outbound = stock ? body : { knowledge_id: resource, ...(isCall ? { tool_name: body.tool_name, params: body.params } : {}) };
       const resp = await fetcher(endpoint(config.knowledgeUrl, req.url), {
         method: 'POST', redirect: 'error', signal: AbortSignal.timeout(config.timeoutMs),
-        headers: { 'content-type': 'application/json', 'x-tdai-service-id': config.serviceId, authorization: `Bearer ${stock ? key : config.coreApiKey}`,
+        headers: { 'content-type': 'application/json', 'x-tdai-service-id': config.serviceId,
+          ...(stock || config.coreApiKey ? { authorization: `Bearer ${stock ? key : config.coreApiKey}` } : {}),
           'x-tdai-user-id': userId, 'x-tdai-team-id': asset.team_id }, body: JSON.stringify(outbound),
       });
       if (stock) {

@@ -16,7 +16,7 @@ import { saveResolvedNetwork } from './network-settings.js';
 import { accountProviders } from '../config/providers.js';
 import type { AccountProvider } from '../config/providers.js';
 import type { ServiceInterface } from '../deployment/model.js';
-import { readInstallationEnv, prepareNativeConfiguration, saveNativeConfiguration, orchestrationEnv, stageNativeRuntime, assertNativeConfigurationCurrent, captureNativeConfiguration } from '../config/native-state.js';
+import { readInstallationEnv, readNativeConfiguration, prepareNativeConfiguration, saveNativeConfiguration, orchestrationEnv, stageNativeRuntime, assertNativeConfigurationCurrent, captureNativeConfiguration } from '../config/native-state.js';
 import { normalizeNativeServiceConfigs } from '../config/native-services.js';
 import { validateTdaiSource, type SourceLock } from '../build/sources.js';
 import { configurationDirectory, displayHomePath } from './paths.js';
@@ -49,7 +49,7 @@ export async function savedProvider(directory: string): Promise<Provider> {
 export async function setupServer(ui: Interaction, options: ServerSetupOptions = {}): Promise<void> {
   const directory = resolve(options.directory ?? configurationDirectory());
   ui.note(`AMS saves compose.yaml and .env in ${displayHomePath(directory)}. Services run in Docker/Podman containers.`, 'Compose configuration');
-  const existing = await readInstallationEnv(directory);
+  const existing = await readInstallationEnv(directory, options.nativeRoot);
   ui.note(catalog.map(service => `${service.label} (${service.description})`).join('\n'), 'Full stack');
   const provider = await ui.select<Provider>('provider', 'Container engine / Compose provider', [
     { value: 'docker', label: 'Docker Compose' }, { value: 'podman', label: 'Podman compose (configured provider)' },
@@ -62,14 +62,14 @@ export async function setupServer(ui: Interaction, options: ServerSetupOptions =
   ui.note(reviewSettings({ ...env, DATA_DIR: displayHomePath(env.DATA_DIR) }), 'Review configuration (secrets redacted)');
   ui.note('Setup will reuse matching local images and build missing or outdated images for the full stack. The first build downloads pinned sources and dependencies. Image records are managed automatically.', 'Container images');
   ui.commit?.();
-  await preserveInputs(directory);
+  await preserveInputs(directory, options.nativeRoot);
   const initialInput = { ...env };
   for (const name of ['MEMORY_LLM_MAX_TOKENS', 'MEMORY_LLM_TIMEOUT_MS', 'KNOWLEDGE_LLM_MAX_TOKENS', 'KNOWLEDGE_LLM_TIMEOUT_MS']) if (!Object.hasOwn(existing, name)) delete initialInput[name];
   const deferOrigins = ['MEMORY_PROXY_PUBLIC_URL', 'KNOWLEDGE_PUBLIC_URL'].filter(name => existing[name] === undefined);
   const pendingSourcePath = join(directory, '.ams/pending-tdai-source.json');
   let initialSource: SourceLock | undefined;
   // A fresh offline import supplies Configure's first defaults; existing installations keep their active source until Apply.
-  if (!await exists(join(directory, '.ams/tdai-source.json')) && !await exists(join(directory, '.ams/native-config.json'))
+  if (!await exists(join(directory, '.ams/tdai-source.json')) && !await readNativeConfiguration(directory, options.nativeRoot)
     && await exists(pendingSourcePath)) {
     initialSource = validateTdaiSource(JSON.parse(await readFile(pendingSourcePath, 'utf8')));
   }
@@ -91,7 +91,7 @@ export async function applyServer(ui: Interaction, directory: string, options: S
   directory = resolve(directory);
   let env: Record<string, string>;
   try {
-    const raw = await readInstallationEnv(directory);
+    const raw = await readInstallationEnv(directory, options.nativeRoot);
     if (!Object.keys(raw).length) throw new Error();
     env = resolveSettings(raw);
   } catch (error) {
@@ -115,7 +115,7 @@ export async function applyServer(ui: Interaction, directory: string, options: S
   try { source = sourceInput === undefined ? undefined : validateTdaiSource(JSON.parse(sourceInput)); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   let native = await prepareNativeConfiguration(directory, env, { root: options.nativeRoot, source });
-  const initializeOrigins = !native.state.originsFinalized;
+  const initializeOrigins = !native.originsFinalized;
   env = resolveSettings(normalizeNativeServiceConfigs(env, native.documents));
   if (native.diagnostics.length) ui.note(native.diagnostics.map(item => `${item.file}:${item.path} — ${item.reason}`).join('\n'), 'Changed upstream defaults');
   let adminKey: string | undefined;
@@ -128,7 +128,7 @@ export async function applyServer(ui: Interaction, directory: string, options: S
     return key;
   };
   ui.commit?.();
-  await preserveInputs(directory);
+  await preserveInputs(directory, options.nativeRoot);
   const manifest = await (options.prepareImages ?? prepareImages)({
     projectDir: directory, source, runtime: provider === 'docker' ? 'docker' : 'podman',
     note: message => ui.note(message, 'Container images'),
@@ -181,6 +181,7 @@ export async function applyServer(ui: Interaction, directory: string, options: S
       await runtime.apply(undefined, { createAdminKey });
       if (initializeOrigins) {
         await saveNativeConfiguration(directory, native);
+        appliedInputs['.ams/native-config.json'] = await readFile(join(directory, '.ams/native-config.json'), 'utf8');
         appliedInputs['.ams/native-backup.json'] = await captureNativeConfiguration(directory);
       }
       await recordAppliedInputs(directory, appliedInputs);

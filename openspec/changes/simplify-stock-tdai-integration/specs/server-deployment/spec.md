@@ -1,3 +1,5 @@
+> Synchronized with the current main specification on 2026-09-19. Overlapping requirements reflect the final stock-TDAI contract; prior design narratives remain historical. Archive this already-synchronized change without applying its deltas again.
+
 ## ADDED Requirements
 
 ### Requirement: Native APIs and separate AMS access boundary

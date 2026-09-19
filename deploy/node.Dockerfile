@@ -79,13 +79,15 @@ CMD ["--config", "/config/proxy.yaml"]
 
 # AMS owns the HTTP boundary; the stdio implementation and its dependencies are
 # the unchanged artifacts from this revision's ordinary Knowledge build.
-FROM base AS mcp
+FROM docker.io/library/node:24-bookworm-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553 AS mcp
+COPY deploy/debian.sources /etc/apt/sources.list.d/debian.sources
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tini && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+ENV NODE_ENV=production
 ARG TDAI_REVISION
 LABEL org.opencontainers.image.source="https://github.com/TencentCloud/TencentDB-Agent-Memory" org.opencontainers.image.revision="${TDAI_REVISION}"
-COPY deploy/locks/mcp/package*.json ./
+COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
-COPY deploy/locks/mcp/bind-loopback.mjs /tmp/bind-loopback.mjs
-RUN node /tmp/bind-loopback.mjs && rm /tmp/bind-loopback.mjs
 COPY --from=knowledge-build /app /opt/knowledge
 COPY .cache/upstream/tencent/LICENSE /opt/knowledge/LICENSE
 COPY dist/runtime/ ./runtime/

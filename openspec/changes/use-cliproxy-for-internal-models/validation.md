@@ -1,3 +1,5 @@
+> Historical validation record. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 # Implementation verification
 
 Verified on 2026-09-19, macOS with Podman, linux/arm64 containers.

@@ -5030,17 +5030,16 @@
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="mcp container · session processes stay private" x="345" y="75" width="1020" height="133" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="mcp container · request processes stay private" x="345" y="75" width="1020" height="133" rx="12" class="c-region" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
         <path data-edge-from="mcp_client" data-edge-to="http_gateway" data-edge-label="Streamable HTTP" data-edge-key="0" data-edge-id="public_mcp" data-composition-points="250,144;370,144" d="M 250 144 L 370 144" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="http_gateway" data-edge-to="supergateway" data-edge-label="Private HTTP" data-edge-key="1" data-edge-id="private_mcp" data-composition-points="600,137;740,137" d="M 600 137 L 740 137" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="supergateway" data-edge-to="adapter" data-edge-label="MCP over stdio" data-edge-key="2" data-edge-id="stdio_bridge" data-composition-points="970,144;1110,144" d="M 970 144 L 1110 144" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="adapter" data-edge-to="access_gate" data-edge-label="HTTP tools + user key" data-edge-key="3" data-edge-id="adapter_http" data-composition-points="1225,188;1225,650" d="M 1225 188 L 1225 650" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="http_gateway" data-edge-to="sdk_transport" data-edge-label="HTTP request" data-edge-key="1" data-edge-id="sdk_dispatch" data-composition-points="600,137;740,137" d="M 600 137 L 740 137" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="sdk_transport" data-edge-to="stock_mcp" data-edge-label="MCP over stdio" data-edge-key="2" data-edge-id="stdio_bridge" data-composition-points="970,144;1110,144" d="M 970 144 L 1110 144" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="stock_mcp" data-edge-to="access_gate" data-edge-label="HTTP tools + user key" data-edge-key="3" data-edge-id="adapter_http" data-composition-points="1225,188;1225,212;1364,212;1364,694;1340,694" d="M 1225 188 L 1225 204 Q 1225 212 1233 212 L 1356 212 Q 1364 212 1364 220 L 1364 686 Q 1364 694 1356 694 L 1340 694" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="http_gateway" data-edge-to="core_identity" data-edge-label="Verify user" data-edge-key="4" data-edge-id="gateway_verify" data-composition-points="600,151;670,151;670,464;740,464" d="M 600 151 L 662 151 Q 670 151 670 159 L 670 456 Q 670 464 678 464 L 740 464" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="access_gate" data-edge-to="core_identity" data-edge-label="Check permissions" data-edge-key="5" data-edge-id="resource_authorization" data-composition-points="1110,694;1040,694;1040,464;970,464" d="M 1110 694 L 1048 694 Q 1040 694 1040 686 L 1040 472 Q 1040 464 1032 464 L 970 464" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="access_gate" data-edge-to="service_boundary" data-edge-label="Service key" data-edge-key="6" data-edge-id="service_auth" data-composition-points="1110,694;970,694" d="M 1110 694 L 970 694" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="service_boundary" data-edge-to="knowledge_tools" data-edge-label="Local HTTP" data-edge-key="7" data-edge-id="knowledge_dispatch" data-composition-points="740,694;600,694" d="M 740 694 L 600 694" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="access_gate" data-edge-to="core_identity" data-edge-label="Check permissions" data-edge-key="5" data-edge-id="resource_authorization" data-composition-points="1225,650;1225,626;994,626;994,464;970,464" d="M 1225 650 L 1225 634 Q 1225 626 1217 626 L 1002 626 Q 994 626 994 618 L 994 472 Q 994 464 986 464 L 970 464" class="a-security" stroke-width="1.5" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="access_gate" data-edge-to="knowledge_tools" data-edge-label="HTTP + service header" data-edge-key="6" data-edge-id="knowledge_dispatch" data-composition-points="1110,694;970,694" d="M 1110 694 L 970 694" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
 
         <!-- Components -->
         <g id="node-mcp_client" data-node-id="mcp_client" data-node-label="Agent MCP client" tabindex="0" role="button" aria-label="Focus Agent MCP client, Memory-user API key, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="Memory-user API key" data-node-context="Architecture component">
@@ -5055,8 +5054,8 @@
         <text data-detail="context" x="140" y="158" class="t-muted" font-size="9" text-anchor="middle">Memory-user API key</text>
         </g>
 
-        <g id="node-http_gateway" data-node-id="http_gateway" data-node-label="AMS HTTP gateway" tabindex="0" role="button" aria-label="Focus AMS HTTP gateway, User checks + session ownership, mcp container · session processes stay private" aria-pressed="false" data-node-kind="security" data-node-sublabel="User checks + session ownership" data-node-tag=":8425 /mcp" data-node-context="mcp container · session processes stay private">
-          <title>AMS HTTP gateway · User checks + session ownership · mcp container · session processes stay private · :8425 /mcp</title>
+        <g id="node-http_gateway" data-node-id="http_gateway" data-node-label="AMS HTTP gateway" tabindex="0" role="button" aria-label="Focus AMS HTTP gateway, Per-request user authentication, mcp container · request processes stay private" aria-pressed="false" data-node-kind="security" data-node-sublabel="Per-request user authentication" data-node-tag=":8425 /mcp" data-node-context="mcp container · request processes stay private">
+          <title>AMS HTTP gateway · Per-request user authentication · mcp container · request processes stay private · :8425 /mcp</title>
           <rect x="370" y="100" width="230" height="88" rx="6" class="c-mask"/>
           <rect x="370" y="100" width="230" height="88" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(376 106) scale(0.6875)">
@@ -5064,32 +5063,32 @@
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="485" y="142" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">AMS HTTP gateway</text>
-        <text data-detail="context" x="485" y="158" class="t-muted" font-size="9" text-anchor="middle">User checks + session ownership</text>
+        <text data-detail="context" x="485" y="158" class="t-muted" font-size="9" text-anchor="middle">Per-request user authentication</text>
         <text data-detail="fine" x="485" y="180" class="t-security" font-size="7" text-anchor="middle">:8425 /mcp</text>
         </g>
 
-        <g id="node-supergateway" data-node-id="supergateway" data-node-label="Supergateway" tabindex="0" role="button" aria-label="Focus Supergateway, Worker per user + credential, mcp container · session processes stay private" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Worker per user + credential" data-node-tag="Private HTTP listener" data-node-context="mcp container · session processes stay private">
-          <title>Supergateway · Worker per user + credential · mcp container · session processes stay private · Private HTTP listener</title>
+        <g id="node-sdk_transport" data-node-id="sdk_transport" data-node-label="Official MCP SDK" tabindex="0" role="button" aria-label="Focus Official MCP SDK, HTTP ↔ stdio transports, mcp container · request processes stay private" aria-pressed="false" data-node-kind="backend" data-node-sublabel="HTTP ↔ stdio transports" data-node-tag="In-process bridge" data-node-context="mcp container · request processes stay private">
+          <title>Official MCP SDK · HTTP ↔ stdio transports · mcp container · request processes stay private · In-process bridge</title>
           <rect x="740" y="100" width="230" height="88" rx="6" class="c-mask"/>
           <rect x="740" y="100" width="230" height="88" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(746 106) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="855" y="142" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Supergateway</text>
-        <text data-detail="context" x="855" y="158" class="t-muted" font-size="9" text-anchor="middle">Worker per user + credential</text>
-        <text data-detail="fine" x="855" y="180" class="t-backend" font-size="7" text-anchor="middle">Private HTTP listener</text>
+          <text data-node-label="" data-detail-anchor="" x="855" y="142" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Official MCP SDK</text>
+        <text data-detail="context" x="855" y="158" class="t-muted" font-size="9" text-anchor="middle">HTTP ↔ stdio transports</text>
+        <text data-detail="fine" x="855" y="180" class="t-backend" font-size="7" text-anchor="middle">In-process bridge</text>
         </g>
 
-        <g id="node-adapter" data-node-id="adapter" data-node-label="AMS MCP adapter" tabindex="0" role="button" aria-label="Focus AMS MCP adapter, Child process per MCP session, mcp container · session processes stay private" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Child process per MCP session" data-node-tag="Two Knowledge tools" data-node-context="mcp container · session processes stay private">
-          <title>AMS MCP adapter · Child process per MCP session · mcp container · session processes stay private · Two Knowledge tools</title>
+        <g id="node-stock_mcp" data-node-id="stock_mcp" data-node-label="Stock TDAI MCP" tabindex="0" role="button" aria-label="Focus Stock TDAI MCP, One child per HTTP request, mcp container · request processes stay private" aria-pressed="false" data-node-kind="backend" data-node-sublabel="One child per HTTP request" data-node-tag="Upstream tool contract" data-node-context="mcp container · request processes stay private">
+          <title>Stock TDAI MCP · One child per HTTP request · mcp container · request processes stay private · Upstream tool contract</title>
           <rect x="1110" y="100" width="230" height="88" rx="6" class="c-mask"/>
           <rect x="1110" y="100" width="230" height="88" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(1116 106) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1225" y="142" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">AMS MCP adapter</text>
-        <text data-detail="context" x="1225" y="158" class="t-muted" font-size="9" text-anchor="middle">Child process per MCP session</text>
-        <text data-detail="fine" x="1225" y="180" class="t-backend" font-size="7" text-anchor="middle">Two Knowledge tools</text>
+          <text data-node-label="" data-detail-anchor="" x="1225" y="142" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Stock TDAI MCP</text>
+        <text data-detail="context" x="1225" y="158" class="t-muted" font-size="9" text-anchor="middle">One child per HTTP request</text>
+        <text data-detail="fine" x="1225" y="180" class="t-backend" font-size="7" text-anchor="middle">Upstream tool contract</text>
         </g>
 
         <g id="node-core_identity" data-node-id="core_identity" data-node-label="Core" tabindex="0" role="button" aria-label="Focus Core, Users, teams, assets and ACL, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Users, teams, assets and ACL" data-node-context="Architecture component">
@@ -5103,42 +5102,29 @@
         <text data-detail="context" x="855" y="478" class="t-muted" font-size="9" text-anchor="middle">Users, teams, assets and ACL</text>
         </g>
 
-        <g id="node-access_gate" data-node-id="access_gate" data-node-label="AMS access gateway" tabindex="0" role="button" aria-label="Focus AMS access gateway, User, resource, team and ACL, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="User, resource, team and ACL" data-node-tag="access:8080" data-node-context="Architecture component">
-          <title>AMS access gateway · User, resource, team and ACL · Architecture component · access:8080</title>
+        <g id="node-access_gate" data-node-id="access_gate" data-node-label="AMS access bridge" tabindex="0" role="button" aria-label="Focus AMS access bridge, User + resource permissions, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="User + resource permissions" data-node-tag="access:8080" data-node-context="Architecture component">
+          <title>AMS access bridge · User + resource permissions · Architecture component · access:8080</title>
           <rect x="1110" y="650" width="230" height="88" rx="6" class="c-mask"/>
           <rect x="1110" y="650" width="230" height="88" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(1116 656) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="1225" y="692" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">AMS access gateway</text>
-        <text data-detail="context" x="1225" y="708" class="t-muted" font-size="9" text-anchor="middle">User, resource, team and ACL</text>
+          <text data-node-label="" data-detail-anchor="" x="1225" y="692" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">AMS access bridge</text>
+        <text data-detail="context" x="1225" y="708" class="t-muted" font-size="9" text-anchor="middle">User + resource permissions</text>
         <text data-detail="fine" x="1225" y="730" class="t-security" font-size="7" text-anchor="middle">access:8080</text>
-        </g>
-
-        <g id="node-service_boundary" data-node-id="service_boundary" data-node-label="Knowledge service" tabindex="0" role="button" aria-label="Focus Knowledge service, Service key + identity boundary, Architecture component" aria-pressed="false" data-node-kind="security" data-node-sublabel="Service key + identity boundary" data-node-tag="knowledge-service:8423" data-node-context="Architecture component">
-          <title>Knowledge service · Service key + identity boundary · Architecture component · knowledge-service:8423</title>
-          <rect x="740" y="650" width="230" height="88" rx="6" class="c-mask"/>
-          <rect x="740" y="650" width="230" height="88" rx="6" class="c-security" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(746 656) scale(0.6875)">
-            <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
-            <path d="m5.8 8 1.5 1.5 3-3"/>
-          </g>
-          <text data-node-label="" data-detail-anchor="" x="855" y="692" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Knowledge service</text>
-        <text data-detail="context" x="855" y="708" class="t-muted" font-size="9" text-anchor="middle">Service key + identity boundary</text>
-        <text data-detail="fine" x="855" y="730" class="t-security" font-size="7" text-anchor="middle">knowledge-service:8423</text>
         </g>
 
         <g id="node-knowledge_tools" data-node-id="knowledge_tools" data-node-label="TDAI Knowledge" tabindex="0" role="button" aria-label="Focus TDAI Knowledge, Wiki and code resource tools, Architecture component" aria-pressed="false" data-node-kind="backend" data-node-sublabel="Wiki and code resource tools" data-node-tag="knowledge:8421" data-node-context="Architecture component">
           <title>TDAI Knowledge · Wiki and code resource tools · Architecture component · knowledge:8421</title>
-          <rect x="370" y="650" width="230" height="88" rx="6" class="c-mask"/>
-          <rect x="370" y="650" width="230" height="88" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(376 656) scale(0.6875)">
+          <rect x="740" y="650" width="230" height="88" rx="6" class="c-mask"/>
+          <rect x="740" y="650" width="230" height="88" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(746 656) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="485" y="692" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">TDAI Knowledge</text>
-        <text data-detail="context" x="485" y="708" class="t-muted" font-size="9" text-anchor="middle">Wiki and code resource tools</text>
-        <text data-detail="fine" x="485" y="730" class="t-backend" font-size="7" text-anchor="middle">knowledge:8421</text>
+          <text data-node-label="" data-detail-anchor="" x="855" y="692" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">TDAI Knowledge</text>
+        <text data-detail="context" x="855" y="708" class="t-muted" font-size="9" text-anchor="middle">Wiki and code resource tools</text>
+        <text data-detail="fine" x="855" y="730" class="t-backend" font-size="7" text-anchor="middle">knowledge:8421</text>
         </g>
 
         <!-- Connection labels -->
@@ -5146,15 +5132,15 @@
           <rect x="269" y="124" width="82" height="14" rx="3" class="c-mask"/>
           <text x="310" y="134" class="t-backend" font-size="8" text-anchor="middle">Streamable HTTP</text>
         </g>
-        <g data-detail="context" data-edge-from="http_gateway" data-edge-to="supergateway" data-edge-label="Private HTTP" data-edge-key="1" data-edge-id="private_mcp">
+        <g data-detail="context" data-edge-from="http_gateway" data-edge-to="sdk_transport" data-edge-label="HTTP request" data-edge-key="1" data-edge-id="sdk_dispatch">
           <rect x="636.2" y="117" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="670" y="127" class="t-backend" font-size="8" text-anchor="middle">Private HTTP</text>
+          <text x="670" y="127" class="t-backend" font-size="8" text-anchor="middle">HTTP request</text>
         </g>
-        <g data-detail="context" data-edge-from="supergateway" data-edge-to="adapter" data-edge-label="MCP over stdio" data-edge-key="2" data-edge-id="stdio_bridge">
+        <g data-detail="context" data-edge-from="sdk_transport" data-edge-to="stock_mcp" data-edge-label="MCP over stdio" data-edge-key="2" data-edge-id="stdio_bridge">
           <rect x="1001.4" y="124" width="77.2" height="14" rx="3" class="c-mask"/>
           <text x="1040" y="134" class="t-backend" font-size="8" text-anchor="middle">MCP over stdio</text>
         </g>
-        <g data-detail="context" data-edge-from="adapter" data-edge-to="access_gate" data-edge-label="HTTP tools + user key" data-edge-key="3" data-edge-id="adapter_http">
+        <g data-detail="context" data-edge-from="stock_mcp" data-edge-to="access_gate" data-edge-label="HTTP tools + user key" data-edge-key="3" data-edge-id="adapter_http">
           <rect x="1169.6" y="192" width="110.8" height="14" rx="3" class="c-mask"/>
           <text x="1225" y="202" class="t-backend" font-size="8" text-anchor="middle">HTTP tools + user key</text>
         </g>
@@ -5163,22 +5149,18 @@
           <text x="670" y="297.5" class="t-security" font-size="8" text-anchor="middle">Verify user</text>
         </g>
         <g data-detail="context" data-edge-from="access_gate" data-edge-to="core_identity" data-edge-label="Check permissions" data-edge-key="5" data-edge-id="resource_authorization">
-          <rect x="994.2" y="559" width="91.6" height="14" rx="3" class="c-mask"/>
-          <text x="1040" y="569" class="t-security" font-size="8" text-anchor="middle">Check permissions</text>
+          <rect x="1063.7" y="606" width="91.6" height="14" rx="3" class="c-mask"/>
+          <text x="1109.5" y="616" class="t-security" font-size="8" text-anchor="middle">Check permissions</text>
         </g>
-        <g data-detail="context" data-edge-from="access_gate" data-edge-to="service_boundary" data-edge-label="Service key" data-edge-key="6" data-edge-id="service_auth">
-          <rect x="1008.6" y="725" width="62.8" height="14" rx="3" class="c-mask"/>
-          <text x="1040" y="735" class="t-backend" font-size="8" text-anchor="middle">Service key</text>
-        </g>
-        <g data-detail="context" data-edge-from="service_boundary" data-edge-to="knowledge_tools" data-edge-label="Local HTTP" data-edge-key="7" data-edge-id="knowledge_dispatch">
-          <rect x="641" y="674" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="670" y="684" class="t-backend" font-size="8" text-anchor="middle">Local HTTP</text>
+        <g data-detail="context" data-edge-from="access_gate" data-edge-to="knowledge_tools" data-edge-label="HTTP + service header" data-edge-key="6" data-edge-id="knowledge_dispatch">
+          <rect x="984.6" y="725" width="110.8" height="14" rx="3" class="c-mask"/>
+          <text x="1040" y="735" class="t-backend" font-size="8" text-anchor="middle">HTTP + service header</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
-        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="mcp container · session processes stay private">
+        <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="mcp container · request processes stay private">
           <rect data-graph-role="structural-frame-label-mask" x="349" y="80" width="258.4" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="353" y="93" class="t-cloud" font-size="9" font-weight="600">mcp container · session processes stay private</text>
+          <text data-boundary-label="" x="353" y="93" class="t-cloud" font-size="9" font-weight="600">mcp container · request processes stay private</text>
         </g>
 
         <!-- Legend -->
@@ -5386,11 +5368,11 @@
       <div class="card">
         <div class="card-header">
           <div class="card-dot cyan"></div>
-          <h3>Tool contract</h3>
+          <h3>Upstream tool contract</h3>
         </div>
         <ul>
-          <li>&bull; list_knowledge_tools and call_knowledge_tool</li>
-          <li>&bull; Both require knowledge_id from Panel. Calls use the listed tool schema.</li>
+          <li>&bull; Tool names, schemas and results come from unchanged TDAI stdio.</li>
+          <li>&bull; AMS connects official SDK transports without a private HTTP server.</li>
         </ul>
       </div>
 
@@ -5400,19 +5382,19 @@
           <h3>Checks before execution</h3>
         </div>
         <ul>
-          <li>&bull; The HTTP gateway verifies user status and the Core–Knowledge pairing.</li>
-          <li>&bull; Access rechecks the user, resource ACL and active team membership.</li>
+          <li>&bull; Every HTTP POST checks the active user before starting TDAI.</li>
+          <li>&bull; Access checks resource permissions and adds the service header.</li>
         </ul>
       </div>
 
       <div class="card">
         <div class="card-header">
           <div class="card-dot violet"></div>
-          <h3>Session lifecycle</h3>
+          <h3>Request lifecycle</h3>
         </div>
         <ul>
-          <li>&bull; Unused failed workers are evicted; lost sessions return 404.</li>
-          <li>&bull; A full MCP container restart discards the pool and sessions. Clients reinitialize.</li>
+          <li>&bull; Each POST starts its own stock stdio process with the caller key.</li>
+          <li>&bull; Response completion or disconnect closes the child. No persistent sessions.</li>
         </ul>
       </div>
     </div>

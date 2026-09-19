@@ -29,7 +29,7 @@
       "id": "http_gateway",
       "type": "security",
       "label": "AMS HTTP gateway",
-      "sublabel": "User checks + session ownership",
+      "sublabel": "Per-request user authentication",
       "tag": ":8425 /mcp",
       "pos": [
         370,
@@ -41,11 +41,11 @@
       ]
     },
     {
-      "id": "supergateway",
+      "id": "sdk_transport",
       "type": "backend",
-      "label": "Supergateway",
-      "sublabel": "Worker per user + credential",
-      "tag": "Private HTTP listener",
+      "label": "Official MCP SDK",
+      "sublabel": "HTTP ↔ stdio transports",
+      "tag": "In-process bridge",
       "pos": [
         740,
         100
@@ -56,11 +56,11 @@
       ]
     },
     {
-      "id": "adapter",
+      "id": "stock_mcp",
       "type": "backend",
-      "label": "AMS MCP adapter",
-      "sublabel": "Child process per MCP session",
-      "tag": "Two Knowledge tools",
+      "label": "Stock TDAI MCP",
+      "sublabel": "One child per HTTP request",
+      "tag": "Upstream tool contract",
       "pos": [
         1110,
         100
@@ -87,26 +87,11 @@
     {
       "id": "access_gate",
       "type": "security",
-      "label": "AMS access gateway",
-      "sublabel": "User, resource, team and ACL",
+      "label": "AMS access bridge",
+      "sublabel": "User + resource permissions",
       "tag": "access:8080",
       "pos": [
         1110,
-        650
-      ],
-      "size": [
-        230,
-        88
-      ]
-    },
-    {
-      "id": "service_boundary",
-      "type": "security",
-      "label": "Knowledge service",
-      "sublabel": "Service key + identity boundary",
-      "tag": "knowledge-service:8423",
-      "pos": [
-        740,
         650
       ],
       "size": [
@@ -121,7 +106,7 @@
       "sublabel": "Wiki and code resource tools",
       "tag": "knowledge:8421",
       "pos": [
-        370,
+        740,
         650
       ],
       "size": [
@@ -133,11 +118,11 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "mcp container \u00b7 session processes stay private",
+      "label": "mcp container · request processes stay private",
       "wraps": [
         "http_gateway",
-        "supergateway",
-        "adapter"
+        "sdk_transport",
+        "stock_mcp"
       ],
       "pad": 25
     }
@@ -151,29 +136,30 @@
       "variant": "emphasis"
     },
     {
-      "id": "private_mcp",
+      "id": "sdk_dispatch",
       "from": "http_gateway",
-      "to": "supergateway",
-      "label": "Private HTTP",
+      "to": "sdk_transport",
+      "label": "HTTP request",
       "variant": "emphasis"
     },
     {
       "id": "stdio_bridge",
-      "from": "supergateway",
-      "to": "adapter",
+      "from": "sdk_transport",
+      "to": "stock_mcp",
       "label": "MCP over stdio",
       "variant": "emphasis"
     },
     {
       "id": "adapter_http",
-      "from": "adapter",
+      "from": "stock_mcp",
       "to": "access_gate",
       "label": "HTTP tools + user key",
       "variant": "emphasis",
       "labelAt": [
         1225,
         202
-      ]
+      ],
+      "toSide": "right"
     },
     {
       "id": "gateway_verify",
@@ -187,50 +173,44 @@
       "from": "access_gate",
       "to": "core_identity",
       "label": "Check permissions",
-      "variant": "security"
+      "variant": "security",
+      "fromSide": "top"
     },
     {
-      "id": "service_auth",
+      "id": "knowledge_dispatch",
       "from": "access_gate",
-      "to": "service_boundary",
-      "label": "Service key",
+      "to": "knowledge_tools",
+      "label": "HTTP + service header",
       "variant": "emphasis",
       "labelAt": [
         1040,
         735
       ]
-    },
-    {
-      "id": "knowledge_dispatch",
-      "from": "service_boundary",
-      "to": "knowledge_tools",
-      "label": "Local HTTP",
-      "variant": "emphasis"
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "Tool contract",
+      "title": "Upstream tool contract",
       "items": [
-        "list_knowledge_tools and call_knowledge_tool",
-        "Both require knowledge_id from Panel. Calls use the listed tool schema."
+        "Tool names, schemas and results come from unchanged TDAI stdio.",
+        "AMS connects official SDK transports without a private HTTP server."
       ]
     },
     {
       "dot": "rose",
       "title": "Checks before execution",
       "items": [
-        "The HTTP gateway verifies user status and the Core\u2013Knowledge pairing.",
-        "Access rechecks the user, resource ACL and active team membership."
+        "Every HTTP POST checks the active user before starting TDAI.",
+        "Access checks resource permissions and adds the service header."
       ]
     },
     {
       "dot": "violet",
-      "title": "Session lifecycle",
+      "title": "Request lifecycle",
       "items": [
-        "Unused failed workers are evicted; lost sessions return 404.",
-        "A full MCP container restart discards the pool and sessions. Clients reinitialize."
+        "Each POST starts its own stock stdio process with the caller key.",
+        "Response completion or disconnect closes the child. No persistent sessions."
       ]
     }
   ]

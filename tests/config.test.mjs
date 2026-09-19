@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveSettings, generate } from '../dist/runtime/config.js';
 import { encodeEnv, decodeEnv, atomicWrite, readEnv } from '../dist/config/files.js';
-import { fields, generateKey } from '../dist/config/settings.js';
+import { fields, generateKey, isNativeSetting } from '../dist/config/settings.js';
 import { prepareNativeConfiguration, saveNativeConfiguration, stageNativeRuntime } from '../dist/config/native-state.js';
 import { parseNativeDocument } from '../dist/config/native-documents.js';
 
@@ -74,5 +74,5 @@ test('applying changed settings preserves service keys and keeps Panel from repl
   assert.equal(parseNativeDocument(await readFile(join(original.generated, 'core.yaml'), 'utf8'), 'yaml').llm.model, 'memory-test');
   await assert.rejects(readFile(join(generated, 'Caddyfile')), { code: 'ENOENT' });
   const template = decodeEnv(await readFile('server/.env.example', 'utf8'));
-  assert.deepEqual(Object.keys(template).sort(), fields.map(f => f.name).sort());
+  assert.deepEqual(Object.keys(template).sort(), fields.filter(f => !isNativeSetting(f.name)).map(f => f.name).sort());
 });

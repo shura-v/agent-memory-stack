@@ -5,22 +5,21 @@ import type { ImageService } from './images.js';
 import { loadSourceLock, packageRoot } from './sources.js';
 
 export const buildFingerprintLabel = 'io.agent-memory-stack.build-fingerprint';
-export const contextPackageJson = '{"type":"module"}\n';
 
 /** Hash packaged inputs and the effective TDAI source, never secrets or paths. */
 export async function buildFingerprint(service: ImageService, root = packageRoot, projectDir?: string): Promise<string> {
   let inputs: string[];
   if (service === 'runtime') {
-    inputs = ['deploy/runtime.Dockerfile', 'dist/runtime', 'dist/config', 'dist/deployment'];
+    inputs = ['deploy/runtime.Dockerfile', 'package.json', 'dist/runtime', 'dist/config', 'dist/deployment'];
   } else if (service === 'mcp') {
-    inputs = ['deploy/node.Dockerfile', 'deploy/debian.sources', 'deploy/locks/mcp',
-      'upstream.lock.json', 'dist/build/sources.js',
+    inputs = ['deploy/node.Dockerfile', 'deploy/debian.sources', 'package.json', 'dist/build/package-lock.json',
+      'vendor/upstream.lock.json', 'dist/build/sources.js',
       'dist/runtime', 'dist/config', 'dist/deployment'];
   } else if (service === 'cli-proxy-api') {
-    inputs = ['deploy/cli-proxy-api.Dockerfile', 'deploy/debian.sources', 'upstream.lock.json'];
+    inputs = ['deploy/cli-proxy-api.Dockerfile', 'deploy/debian.sources', 'vendor/upstream.lock.json'];
   } else {
     inputs = ['deploy/node.Dockerfile', 'deploy/debian.sources',
-      'upstream.lock.json', 'dist/build/sources.js'];
+      'vendor/upstream.lock.json', 'dist/build/sources.js'];
   }
   const hash = createHash('sha256').update(`ams-build-inputs-v1\0${service}\0`);
   const add = (name: string, bytes: Uint8Array) => hash.update(JSON.stringify([name, bytes.length])).update(bytes);
@@ -39,6 +38,5 @@ export async function buildFingerprint(service: ImageService, root = packageRoot
     const { revision, url, sha256 } = (await loadSourceLock(projectDir, root)).sources.tencent;
     add('effective-tencent-source', Buffer.from(JSON.stringify({ revision, url, sha256 })));
   }
-  if (service === 'runtime') add('package.json', Buffer.from(contextPackageJson));
   return `sha256:${hash.digest('hex')}`;
 }

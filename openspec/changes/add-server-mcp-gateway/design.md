@@ -1,3 +1,7 @@
+> The credential-pool and persistent-session lifecycle below is historical. The current request-scoped stateless contract is defined in [the stock integration change](../simplify-stock-tdai-integration/) and [the MCP specification](../../specs/server-mcp-gateway/spec.md).
+
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## Context
 
 See `proposal.md` for motivation. Current deployment selection is centralized in `src/deployment/model.ts`; required images, interfaces, and startup ordering are derived from it. Knowledge already has a protected user-facing gateway distinct from its raw service API.

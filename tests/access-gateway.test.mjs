@@ -28,7 +28,7 @@ function backend(options = {}) {
 
 async function fixture(t, options = {}) {
   const upstream = backend(options);
-  const config = gatewayConfig({ CORE_API_KEY: 'backend-secret' });
+  const config = gatewayConfig(options.withoutServiceKey ? {} : { CORE_API_KEY: 'backend-secret' });
   const server = http.createServer(createGatewayHandler(config, upstream.fetcher));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
@@ -172,4 +172,13 @@ test('stock route bridge rejects create/delete/admin and unknown routes', async 
     assert.equal((await f.request({}, { path })).status, 404);
   }
   assert.equal(f.calls.length, 0);
+});
+
+test('no Core service key still requires a valid user and resource permissions', async t => {
+  const f = await fixture(t, { withoutServiceKey: true });
+  assert.equal((await f.request()).status, 200);
+  for (const call of f.calls) assert.equal(call.headers.authorization, undefined);
+  assert.equal(f.calls.find(call => call.route.endsWith('/auth/verify')).headers['x-tdai-user-key'], 'alice-key');
+  assert.equal((await f.request({}, { headers: { authorization: 'Bearer invalid-key' } })).status, 401);
+  assert.equal((await f.request({ knowledge_id: 'private' })).status, 403);
 });

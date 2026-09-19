@@ -1,10 +1,10 @@
-> Synchronized with the current main specification on 2026-09-19. Overlapping requirements reflect the final stock-TDAI contract; prior design narratives remain historical. Archive this already-synchronized change without applying its deltas again.
+# native-service-configs Specification
 
 ## Purpose
 
 Give operators the complete native TDAI configuration surface through visible upstream defaults and persistent overrides, with explicit precedence and coherent version updates.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Revision-matched native template sources
 

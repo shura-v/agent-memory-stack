@@ -6,7 +6,6 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { createMcpGateway } from '../dist/runtime/mcp-gateway.js';
-import { McpWorkers, supergatewayFactory } from '../dist/runtime/mcp-workers.js';
 import { createGatewayHandler, gatewayConfig } from '../dist/runtime/access-gateway.js';
 
 const stockServer = process.env.AMS_STOCK_MCP ? realpathSync(process.env.AMS_STOCK_MCP) : undefined;
@@ -18,9 +17,9 @@ const close = server => { server.closeAllConnections(); return new Promise(resol
 
 // Supply the selected revision's ordinary Knowledge build artifact. No copied
 // upstream sources or substitute tool implementation is part of this fixture.
-test('stock stdio MCP runs through real Supergateway with isolated users and resource authorization', { skip: !stockServer, timeout: 30_000 }, async t => {
+test('stock stdio MCP runs through official SDK transports with isolated users and resource authorization', { skip: !stockServer, timeout: 90_000 }, async t => {
   const state = { revoked: false, denied: false, removed: false };
-  const forwarded = [], clients = [], children = [];
+  const forwarded = [], clients = [];
   const knowledge = http.createServer(async (req, res) => {
     let text = ''; for await (const chunk of req) text += chunk;
     forwarded.push({ path: req.url, headers: req.headers, body: JSON.parse(text) });
@@ -44,15 +43,11 @@ test('stock stdio MCP runs through real Supergateway with isolated users and res
   };
   const access = http.createServer(createGatewayHandler(gatewayConfig({ CORE_URL: 'http://core', CORE_API_KEY: 'core-service-key', KNOWLEDGE_URL: knowledgeUrl }), fetcher));
   const accessUrl = await listen(access);
-  const factory = supergatewayFactory(accessUrl, stockServer);
-  const workers = new McpWorkers(async key => { const worker = await factory(key); children.push(worker); return worker; });
-  const gateway = createMcpGateway({ port: 8425, coreUrl: 'http://core', coreApiKey: 'core-service-key', knowledgeToolsUrl: accessUrl, serviceId: 'ams' }, { workers, fetcher });
+  const gateway = createMcpGateway({ port: 8425, coreUrl: 'http://core', coreApiKey: 'core-service-key', knowledgeToolsUrl: accessUrl, serviceId: 'ams' }, { stockServer, fetcher });
   const gatewayUrl = await listen(gateway);
   t.after(async () => {
     await Promise.all(clients.map(client => client.close().catch(() => {})));
-    await workers.close();
     await Promise.all([close(gateway), close(access), close(knowledge)]);
-    assert.ok(children.every(worker => !worker.alive()), 'all owned worker processes are stopped');
   });
   const connect = async key => {
     const client = new Client({ name: `agent-${key}`, version: '1' });
@@ -63,9 +58,9 @@ test('stock stdio MCP runs through real Supergateway with isolated users and res
     authorization: 'Bearer alice', 'content-type': 'application/json; charset=iso-8859-1', accept: 'application/json, text/event-stream',
   }, body: JSON.stringify({ jsonrpc: '2.0', method: 'initialize', id: 1, params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'bad-encoding', version: '1' } } }) });
   assert.equal(failed.status, 415); await failed.text();
-  for (let attempt = 0; attempt < 50 && children[0]?.alive(); attempt++) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(children[0].alive(), false, 'failed initialization reaps its worker and stock stdio child');
   const alice = await connect('alice'), bob = await connect('bob');
+  assert.equal(alice.transport.sessionId, undefined);
+  assert.equal(bob.transport.sessionId, undefined);
   const direct = new Client({ name: 'direct-stock-comparison', version: '1' });
   clients.push(direct);
   await direct.connect(new StdioClientTransport({ command: process.execPath, args: [stockServer],
@@ -83,11 +78,6 @@ test('stock stdio MCP runs through real Supergateway with isolated users and res
     assert.equal(forwarded.at(-1).headers['x-tdai-service-id'], 'ams');
     assert.equal(forwarded.at(-1).headers.authorization, 'Bearer alice');
   }
-  assert.equal(children.filter(worker => worker.alive()).length, 2, 'one active worker per credential');
-  const hijack = await fetch(gatewayUrl + '/mcp', { method: 'POST', headers: {
-    authorization: 'Bearer bob', 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-session-id': alice.transport.sessionId,
-  }, body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 77 }) });
-  assert.equal(hijack.status, 404); await hijack.text();
   const own = { name: 'wiki_search', arguments: { wiki_id: 'wiki-bob', query: 'fact' } };
   assert.equal((await bob.client.callTool(own)).isError, false);
   assert.equal(forwarded.at(-1).headers.authorization, 'Bearer bob');

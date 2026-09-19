@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { acquireSourceArchive, cacheSourceArchive, fetchSources, loadSourceLock, packageRoot, validateTdaiSource } from '../dist/build/sources.js';
 import { imageServices, prepareBuildContext, validateImageManifest, validateDeploymentImages } from '../dist/build/images.js';
 import { exportImages, loadImages } from '../dist/build/bundle.js';
-import { buildFingerprint, buildFingerprintLabel, contextPackageJson } from '../dist/build/fingerprint.js';
+import { buildFingerprint, buildFingerprintLabel } from '../dist/build/fingerprint.js';
 import { prepareImages } from '../dist/setup/images.js';
 import { setupServer } from '../dist/setup/server.js';
 import { getNativeTemplates } from '../dist/config/native-templates.js';
@@ -29,7 +29,7 @@ test('deployment manifest rejects incomplete and mixed-architecture image sets',
 test('a tampered cached archive fails before extraction', async () => {
   const project = await mkdtemp(resolve(tmpdir(), 'ams-build-tamper-'));
   try {
-    const lock = JSON.parse(await readFile(resolve(packageRoot, 'upstream.lock.json'), 'utf8'));
+    const lock = JSON.parse(await readFile(resolve(packageRoot, 'vendor/upstream.lock.json'), 'utf8'));
     const cache = resolve(project, '.ams-build/.cache/upstream');
     await mkdir(cache, { recursive: true });
     await writeFile(resolve(cache, `tencent-${lock.sources.tencent.revision}.tar.gz`), 'corrupted archive');
@@ -63,13 +63,13 @@ test('verified source preparation preserves source and dependency bytes and repl
     await writeFile(resolve(original, name), value);
   }
   await mkdir(cache, { recursive: true });
-  await mkdir(packageDirectory);
+  await mkdir(resolve(packageDirectory, 'vendor'), { recursive: true });
   const revision = 'a'.repeat(40);
   const archive = resolve(cache, `tencent-${revision}.tar.gz`);
   execFileSync('tar', ['-czf', archive, '-C', resolve(original, '..'), 'source']);
   const source = { revision, url: 'https://example.invalid/never-downloaded',
     sha256: createHash('sha256').update(await readFile(archive)).digest('hex') };
-  await writeFile(resolve(packageDirectory, 'upstream.lock.json'), JSON.stringify({ sources: { tencent: source }, images: {} }));
+  await writeFile(resolve(packageDirectory, 'vendor/upstream.lock.json'), JSON.stringify({ sources: { tencent: source }, images: {} }));
   const prepared = resolve(cache, 'tencent');
   for (let attempt = 0; attempt < 2; attempt++) {
     await mkdir(resolve(prepared, 'MemoryProxy/src'), { recursive: true });
@@ -88,7 +88,7 @@ test('verified source preparation preserves source and dependency bytes and repl
 });
 
 test('TDAI build recipe uses stock dependency metadata and stock service entrypoints', async () => {
-  const recipe = (await readFile(resolve(packageRoot, 'deploy/node.Dockerfile'), 'utf8')).split('FROM base AS mcp')[0];
+  const recipe = (await readFile(resolve(packageRoot, 'deploy/node.Dockerfile'), 'utf8')).split('# AMS owns the HTTP boundary')[0];
   assert.match(recipe, /^FROM docker.io\/library\/node:22-bookworm-slim@sha256:[a-f0-9]{64} AS base$/m);
   assert.doesNotMatch(recipe, /deploy\/locks|dist\/runtime|dist\/build|AMS_ENV_FILE|ams-integration|npm pkg|npm install --save/);
   for (const service of ['MemoryCore', 'MemoryKnowledge', 'MemoryPanel', 'MemoryPanel/web', 'MemoryProxy']) {
@@ -101,7 +101,12 @@ test('TDAI build recipe uses stock dependency metadata and stock service entrypo
   for (const directory of ['core', 'knowledge', 'panel', 'panel-web', 'proxy']) {
     await assert.rejects(readFile(resolve(packageRoot, `deploy/locks/${directory}/package.json`)), { code: 'ENOENT' });
   }
-  assert.equal(JSON.parse(await readFile(resolve(packageRoot, 'deploy/locks/mcp/package.json'), 'utf8')).name, 'ams-mcp-runtime');
+  const mcpRecipe = (await readFile(resolve(packageRoot, 'deploy/node.Dockerfile'), 'utf8')).split('# AMS owns the HTTP boundary')[1];
+  assert.match(mcpRecipe, /COPY package\.json package-lock\.json/);
+  assert.doesNotMatch(mcpRecipe, /supergateway|bind-loopback|vendor\/mcp/);
+  const manifest = JSON.parse(await readFile(resolve(packageRoot, 'package.json'), 'utf8'));
+  assert.ok(manifest.dependencies['@modelcontextprotocol/sdk']);
+  assert.ok(!manifest.dependencies.supergateway && !manifest.devDependencies.supergateway);
 });
 
 test('source acquisition downloads once and rejects corrupt cache without substituting bytes', async t => {
@@ -140,10 +145,11 @@ test('build context uses installed package resources, not caller files or secret
     await writeFile(resolve(project, 'deploy/node.Dockerfile'), 'caller-controlled Dockerfile');
     const context = await prepareBuildContext(project);
     assert.match(await readFile(resolve(context, 'deploy/node.Dockerfile'), 'utf8'), /^FROM docker.io\/library\/node:22-bookworm-slim@sha256:/m);
+    for (const path of ['package.json', 'package-lock.json', 'vendor/upstream.lock.json'])
+      assert.deepEqual(await readFile(resolve(context, path)), await readFile(resolve(packageRoot, path)), path);
     await assert.rejects(readFile(resolve(context, '.env')), { code: 'ENOENT' });
     assert.match(await readFile(resolve(context, 'dist/runtime/config.js'), 'utf8'), /readInstallationEnv/);
     await assert.rejects(readFile(resolve(context, 'dist/runtime/config.js.map')), { code: 'ENOENT' });
-    assert.equal(await readFile(resolve(context, 'package.json'), 'utf8'), contextPackageJson);
   } finally { await rm(project, { recursive: true, force: true }); }
 });
 
@@ -175,7 +181,7 @@ test('checksum-valid image archive missing a declared content identity is reject
 test('build fingerprints follow packaged bytes and remain stable across directories, docs, secrets and source maps', async t => {
   const root = await mkdtemp(resolve(tmpdir(), 'ams-fingerprint-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const path of ['deploy', 'dist/runtime', 'dist/config', 'dist/deployment', 'dist/build', 'upstream.lock.json']) {
+  for (const path of ['deploy', 'vendor', 'dist/runtime', 'dist/config', 'dist/deployment', 'dist/build', 'package.json', 'package-lock.json']) {
     await mkdir(resolve(root, path, '..'), { recursive: true });
     await cp(resolve(packageRoot, path), resolve(root, path), { recursive: true });
   }
@@ -183,9 +189,18 @@ test('build fingerprints follow packaged bytes and remain stable across director
   for (const service of imageServices) assert.equal(hashes[service], await buildFingerprint(service), service);
   await writeFile(resolve(root, '.env'), 'LLM_API_KEY=synthetic-secret');
   await writeFile(resolve(root, 'README.md'), 'Different documentation');
-  await writeFile(resolve(root, 'package.json'), '{"version":"999.0.0"}');
   await writeFile(resolve(root, 'dist/runtime/config.js.map'), 'different machine source map');
   for (const service of imageServices) assert.equal(hashes[service], await buildFingerprint(service, root), service);
+  const manifest = resolve(root, 'package.json');
+  const originalManifest = await readFile(manifest, 'utf8');
+  await writeFile(manifest, originalManifest + '\n');
+  for (const service of ['runtime', 'mcp']) assert.notEqual(hashes[service], await buildFingerprint(service, root));
+  assert.equal(hashes.core, await buildFingerprint('core', root));
+  await writeFile(manifest, originalManifest);
+  const dependencies = resolve(root, 'dist/build/package-lock.json');
+  await writeFile(dependencies, (await readFile(dependencies, 'utf8')) + '\n');
+  assert.notEqual(hashes.mcp, await buildFingerprint('mcp', root));
+  assert.equal(hashes.runtime, await buildFingerprint('runtime', root));
   const config = resolve(root, 'dist/config/settings.js');
   await writeFile(config, (await readFile(config, 'utf8')) + '\n// newly supported env field\n');
   assert.notEqual(hashes.runtime, await buildFingerprint('runtime', root));
@@ -194,7 +209,7 @@ test('build fingerprints follow packaged bytes and remain stable across director
   await writeFile(recipe, (await readFile(recipe, 'utf8')) + '\n# Updated stock build recipe\n');
   assert.notEqual(hashes['memory-proxy'], await buildFingerprint('memory-proxy', root));
   assert.equal(hashes['cli-proxy-api'], await buildFingerprint('cli-proxy-api', root));
-  const lock = resolve(root, 'upstream.lock.json');
+  const lock = resolve(root, 'vendor/upstream.lock.json');
   await writeFile(lock, (await readFile(lock, 'utf8')) + '\n');
   assert.notEqual(hashes['cli-proxy-api'], await buildFingerprint('cli-proxy-api', root));
 });

@@ -1,3 +1,7 @@
+> The credential-pool and persistent-session lifecycle below is historical. The current request-scoped stateless contract is defined in [the stock integration change](../simplify-stock-tdai-integration/) and [the MCP specification](../../specs/server-mcp-gateway/spec.md).
+
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## 1. Deployment configuration
 
 - [x] 1.1 Add MCP to fresh full-stack defaults and `MCP_PORT` to shared automatic allocation, preserving existing explicit selections; deliver the resolver and saved enabled/resolved-port metadata contract without service, address, port, or interface prompts.

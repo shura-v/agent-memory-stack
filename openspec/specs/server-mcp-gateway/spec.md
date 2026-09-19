@@ -1,10 +1,10 @@
-> Synchronized with the current main specification on 2026-09-19. Overlapping requirements reflect the final stock-TDAI contract; prior design narratives remain historical. Archive this already-synchronized change without applying its deltas again.
+# server-mcp-gateway Specification
 
 ## Purpose
 
 Provide server-hosted Knowledge MCP access for local or remote agents while retaining the caller's memory-user identity and existing resource permissions.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Server-hosted Streamable HTTP
 

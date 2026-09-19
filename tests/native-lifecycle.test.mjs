@@ -60,7 +60,8 @@ test('same-revision apply preserves native manual fields and dedicated key witho
   await saveNativeConfiguration(f.project, candidate);
   assert.equal(await readFile(path, 'utf8'), before);
   assert.equal((await stat(path)).mtimeMs, modified);
-  assert.equal((await stat(join(f.root, '.ams-state.json'))).mode & 0o777, 0o600);
+  assert.equal((await stat(join(f.project, '.ams/native-config.json'))).mode & 0o777, 0o600);
+  await assert.rejects(stat(join(f.root, '.ams-state.json')), { code: 'ENOENT' });
   assert.equal((await stat(f.root)).mode & 0o777, 0o700);
 });
 
@@ -78,7 +79,7 @@ test('removing or emptying initialized admin.apiKey stays operator-owned without
   }
 });
 
-test('saved root association survives XDG changes and refuses another installation', async t => {
+test('saved root association survives XDG changes and complete sets can be adopted by another installation', async t => {
   const f = await fixture(t);
   const previousXdg = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = join(f.root, 'different-xdg');
@@ -86,7 +87,12 @@ test('saved root association survives XDG changes and refuses another installati
   assert.equal(await nativeConfigurationRoot(f.project), f.root);
   const other = join(f.project, 'another-installation');
   await mkdir(other);
-  await assert.rejects(prepareNativeConfiguration(other, f.env, { root: f.root, source: f.source }), /Native configuration directory is occupied/);
+  const adopted = await prepareNativeConfiguration(other, f.env, { root: f.root });
+  assert.deepEqual(adopted.defaults, (await readNativeConfiguration(f.project)).defaults);
+  await saveNativeConfiguration(other, adopted);
+  assert.deepEqual(JSON.parse(await readFile(join(other, '.ams/native-config.json'), 'utf8')), {
+    version: 1, root: f.root, originsFinalized: true,
+  });
 });
 
 test('host edits between preparation and activation are rejected without replacing them', async t => {
@@ -213,22 +219,30 @@ test('switching from CLIProxyAPI to external uses native connections for both in
   }
 });
 
-test('native state with a matching owner is not reused after its runtime association is removed', async t => {
+test('complete native sets survive a missing root reference without reseeding', async t => {
   const f = await fixture(t);
-  await f.edit('core.yaml', [{ path: ['llm', 'model'], value: 'abandoned-native-model' }]);
+  await f.edit('core.yaml', [{ path: ['llm', 'model'], value: 'operator-model' }]);
   const candidate = await f.prepare();
-  const state = await readFile(join(f.root, '.ams-state.json'), 'utf8');
   const documents = await readNativeDocuments(f.project);
+  const overrides = await Promise.all(Object.keys(candidate.overrides).map(name => readFile(join(f.root, 'overrides', name), 'utf8')));
   await rm(join(f.project, '.ams/native-config.json'));
-  await assert.rejects(f.prepare(), /occupied: .*restore its saved \.ams\/native-config\.json association or select an empty native configuration directory/);
-  await assert.rejects(saveNativeConfiguration(f.project, candidate), /Native configuration directory is occupied/);
-  assert.equal(await readFile(join(f.root, '.ams-state.json'), 'utf8'), state);
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = f.root;
+  t.after(() => { if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = oldXdg; });
+  // An explicit root works before its reference is recreated, independently of XDG.
+  assert.deepEqual(await readNativeDocuments(f.project, f.root), documents);
+  assert.equal((await readInstallationEnv(f.project, f.root)).MEMORY_LLM_MODEL, 'operator-model');
+  const backup = JSON.parse(await captureNativeConfiguration(f.project, f.root));
+  assert.equal(backup.root, f.root);
+  assert.equal(Object.hasOwn(backup, 'state'), false);
+  assert.equal(Object.hasOwn(backup, 'originsFinalized'), false);
+  await assert.rejects(readFile(join(f.root, '.ams-state.json')), { code: 'ENOENT' });
   await assert.rejects(readFile(join(f.project, '.ams/native-config.json')), { code: 'ENOENT' });
-  const clean = await f.prepare({ root: join(f.root, '..', 'fresh-config') });
-  assert.equal(value(clean.documents['core.yaml']).llm.model, f.env.MEMORY_LLM_MODEL);
-  await saveNativeConfiguration(f.project, clean);
-  await saveNativeConfiguration(f.project, clean);
-  assert.equal(value((await readNativeDocuments(f.project))['core.yaml']).llm.model, f.env.MEMORY_LLM_MODEL);
+  assert.deepEqual((await f.prepare()).documents, documents);
+  await saveNativeConfiguration(f.project, candidate);
+  assert.equal(JSON.parse(await readFile(join(f.project, '.ams/native-config.json'), 'utf8')).root, f.root);
+  assert.deepEqual(await readNativeDocuments(f.project), documents);
+  assert.deepEqual(await Promise.all(Object.keys(candidate.overrides).map(name => readFile(join(f.root, 'overrides', name), 'utf8'))), overrides);
 });
 
 test('initial native save accepts missing or empty roots and remains idempotent', async t => {
@@ -242,17 +256,67 @@ test('initial native save accepts missing or empty roots and remains idempotent'
   });
 });
 
+test('missing root reference does not regenerate a deliberately removed override', async t => {
+  const f = await fixture(t);
+  const path = join(f.root, 'overrides/proxy.yaml');
+  await rm(path);
+  await rm(join(f.project, '.ams/native-config.json'));
+  const candidate = await f.prepare();
+  assert.equal(candidate.overrides['proxy.yaml'], undefined);
+  assert.equal(proxyAdminKey(candidate.documents), '');
+  await saveNativeConfiguration(f.project, candidate);
+  await assert.rejects(readFile(path), { code: 'ENOENT' });
+});
+
+test('missing root reference does not regenerate an intentionally removed administrative key', async t => {
+  const f = await fixture(t);
+  await f.edit('proxy.yaml', [{ path: ['admin', 'apiKey'], delete: true }]);
+  const before = await readFile(join(f.root, 'overrides/proxy.yaml'), 'utf8');
+  await rm(join(f.project, '.ams/native-config.json'));
+  const candidate = await f.prepare();
+  assert.equal(proxyAdminKey(candidate.documents), '');
+  await saveNativeConfiguration(f.project, candidate);
+  assert.equal(await readFile(join(f.root, 'overrides/proxy.yaml'), 'utf8'), before);
+  assert.equal(proxyAdminKey(await readNativeDocuments(f.project)), '');
+});
+
+test('incomplete native sets fail without a reference and remain untouched', async t => {
+  for (const name of ['defaults', 'overrides']) await t.test(name, async t => {
+    const f = await fixture(t, { initialize: false });
+    await mkdir(f.root);
+    const path = join(f.root, name, 'operator-file');
+    await mkdir(join(f.root, name));
+    const contents = 'Unassociated native content must be preserved.\n';
+    await writeFile(path, contents);
+    await assert.rejects(f.prepare(), /Missing native configuration/);
+    assert.equal(await readFile(path, 'utf8'), contents);
+    await assert.rejects(readFile(join(f.project, '.ams/native-config.json')), { code: 'ENOENT' });
+  });
+});
+
+test('.ams-state.json is unrelated and never read, rewritten or removed', async t => {
+  const f = await fixture(t, { initialize: false });
+  await mkdir(f.root);
+  const path = join(f.root, '.ams-state.json');
+  const contents = 'retained operator file\n';
+  await writeFile(path, contents);
+  await saveNativeConfiguration(f.project, await f.prepare());
+  assert.equal(await readFile(path, 'utf8'), contents);
+});
+
 test('all five defaults stay byte-exact while partial overlays contain only installation settings', async t => {
   const f = await fixture(t);
   const saved = await readNativeConfiguration(f.project);
   assert.equal(Object.keys(saved.defaults).length, 5);
   assert.equal(Object.keys(saved.overrides).length, 5);
-  assert.equal(Object.hasOwn(saved.state, 'provisioned'), false);
   assert.deepEqual(saved.defaults, f.revisions.get(f.source.revision).files);
   assert.equal(value(saved.overrides['core.yaml']).futureOption, undefined);
   assert.equal(value((await readNativeDocuments(f.project))['core.yaml']).futureOption, 'upstream-default');
-  const metadata = await readFile(join(f.root, '.ams-state.json'), 'utf8');
-  assert.doesNotMatch(metadata, /synthetic-core-key|seedEnv|baseline|sk-ams-proxy-admin/);
+  const reference = JSON.parse(await readFile(join(f.project, '.ams/native-config.json'), 'utf8'));
+  assert.deepEqual(reference, { version: 1, root: f.root, originsFinalized: true });
+  const backup = JSON.parse(await captureNativeConfiguration(f.project));
+  assert.equal(Object.hasOwn(backup, 'state'), false);
+  assert.equal(Object.hasOwn(backup, 'originsFinalized'), false);
 });
 
 test('successive template upgrades retain exact overrides and deletion declarations for all services', async t => {
@@ -270,7 +334,7 @@ test('successive template upgrades retain exact overrides and deletion declarati
     assert.equal(value(candidate.documents['proxy.yaml']).futureOption, 'proxy-operator');
     assert.deepEqual(candidate.overrides, overrides);
     assert.equal(candidate.deletions, deleted);
-    assert.equal(candidate.state.source.revision, source.revision);
+    assert.equal(candidate.source.revision, source.revision);
     assert.equal(value(candidate.defaults['proxy.yaml']).futureOption, digit);
     await saveNativeConfiguration(f.project, candidate);
     await f.prepare({ source });
@@ -280,12 +344,17 @@ test('successive template upgrades retain exact overrides and deletion declarati
   assert.equal(value(restoredInheritance.documents['core.yaml']).futureOption, 'new-c');
 });
 
-test('modified defaults fail provenance and offline reapply uses verified saved defaults', async t => {
+test('ordinary preparation accepts operator default edits and explicit source replacement restores selected defaults', async t => {
   const f = await fixture(t);
   await rm(join(f.project, '.ams-build'), { recursive: true });
-  assert.deepEqual((await f.prepare()).documents, await readNativeDocuments(f.project));
+  assert.deepEqual((await prepareNativeConfiguration(f.project, f.env, { root: f.root })).documents, await readNativeDocuments(f.project));
   await writeFile(join(f.root, 'defaults/core.yaml'), 'changed: true\n');
-  await assert.rejects(f.prepare(), /defaults\/core.yaml: template provenance mismatch/);
+  const ordinary = await prepareNativeConfiguration(f.project, f.env, { root: f.root });
+  assert.equal(ordinary.defaults['core.yaml'], 'changed: true\n');
+  assert.equal(value(ordinary.documents['core.yaml']).changed, true);
+  await installNativeSourceFixture(f.project, f.revisions.get(f.source.revision), { select: false });
+  const replacement = await f.prepare({ source: f.source });
+  assert.deepEqual(replacement.defaults, f.revisions.get(f.source.revision).files);
 });
 
 test('explicit wizard edits change reviewed fields only; ordinary apply preserves overrides', async t => {
@@ -308,7 +377,7 @@ test('explicit wizard edits change reviewed fields only; ordinary apply preserve
 test('first port allocation fills deferred origins once and preserves later custom origins', async t => {
   const f = await fixture(t, { initialize: false });
   const initial = await f.prepare({ deferOrigins: ['MEMORY_PROXY_PUBLIC_URL'] });
-  assert.equal(initial.state.originsFinalized, false);
+  assert.equal(initial.originsFinalized, false);
   assert.equal(value(initial.overrides['proxy.yaml']).injection.externalGatewayUrl, '');
   await saveNativeConfiguration(f.project, initial);
   const allocated = await f.prepare({ finalizeOrigins: true }, { ...f.env, MEMORY_PROXY_PUBLIC_URL: 'http://127.0.0.1:19096' });
@@ -360,9 +429,9 @@ test('changing the runtime root association invalidates a prepared candidate', a
   const f = await fixture(t);
   const candidate = await f.prepare();
   const reference = join(f.project, '.ams/native-config.json');
-  const changed = JSON.stringify({ version: 1, root: join(f.root, '..', 'different') });
+  const changed = JSON.stringify({ version: 1, root: join(f.root, '..', 'different'), originsFinalized: true });
   await writeFile(reference, changed);
-  await assert.rejects(saveNativeConfiguration(f.project, candidate), /root association changed after preparation/);
+  await assert.rejects(saveNativeConfiguration(f.project, candidate), /native-config\.json/);
   assert.equal(await readFile(reference, 'utf8'), changed);
 });
 

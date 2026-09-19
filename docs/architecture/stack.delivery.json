@@ -6,12 +6,12 @@
   "input": "/Users/super/git/agent-memory-stack/docs/architecture/stack.json",
   "output": "/Users/super/git/agent-memory-stack/docs/architecture/stack.html",
   "specification": {
-    "sha256": "f5f7c0b72989241c77ac1beea3f08190f25b135e3c89ec0e2ff45f5715fab81b",
-    "bytes": 5289
+    "sha256": "81c96d0ffaa704ef31e3787c053dc94b6cbb8cc3591bb2b5e0c0a8162b21a8ba",
+    "bytes": 5323
   },
   "artifact": {
-    "sha256": "001adb5f4f1156a4e7fb37588b24a5788ac1d379909b1fab6c45402f5b4f5a3b",
-    "bytes": 717233
+    "sha256": "42a5baeca16ec8dd3fe912a3bd0ebe908d7321d678a730234e394ce319a343cc",
+    "bytes": 717294
   },
   "validation": {
     "checksPassed": 9,

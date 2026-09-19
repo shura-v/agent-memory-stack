@@ -28,7 +28,7 @@ export function userAuthorizer(config: UserAuthConfig, fetcher: typeof fetch = f
   const core = async (route: string, body: JsonObject, key: string, internal = false): Promise<JsonObject> => {
     const response = await fetcher(serviceEndpoint(String(config.coreUrl), `/v3/${internal ? 'internal/' : ''}meta/${route}`), {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(config.timeoutMs ?? 10_000),
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${config.coreApiKey}`,
+      headers: { 'content-type': 'application/json', ...(config.coreApiKey ? { authorization: `Bearer ${config.coreApiKey}` } : {}),
         'x-tdai-service-id': config.serviceId, 'x-tdai-user-key': key }, body: JSON.stringify(body),
     });
     if (!response.ok) throw new AccessError(response.status < 500 ? 403 : 503, response.status < 500 ? 'Access denied' : 'Authorization unavailable');

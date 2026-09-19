@@ -1,7 +1,9 @@
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## 1. Visible configuration sets and composition
 
-- [x] 1.1 Extract all five templates from the verified selected TDAI archive with source revision, paths and digests. Existing template tests verify missing files, checksums and revision mismatches; reuse this component for defaults.
-- [x] 1.2 Store complete raw templates in `defaults/` and partial native documents in `overrides/` under the recorded native root. Verify XDG/default roots, independent runtime identity, exact template bytes, default-tamper errors, restricted override permissions and rejection of occupied unassociated roots.
+- [x] 1.1 Extract all five templates from the verified selected TDAI archive. Existing template tests verify missing files, archive integrity and revision mismatches; reuse this component for defaults without persisting a template manifest.
+- [x] 1.2 Store complete operator-owned documents in `defaults/` and partial native documents in `overrides/` under the recorded native root. Verify XDG/default roots, independent runtime identity, initial template bytes, restricted permissions, missing-reference adoption of complete sets and structural rejection of incomplete sets.
 - [x] 1.3 Replace three-way document merging with deterministic defaults-plus-overrides composition for YAML, dotenv and JSON using existing adapters. Verify nested maps, atomic arrays, scalar/type replacement, null/empty/false/zero, additions, removed overrides falling back to defaults, comment retention and literal special-character credentials.
 - [x] 1.4 Implement `overrides/deletions.json` as the explicit field-removal mechanism described in the design. Verify JSON Pointer escaping, missing-target no-ops, whole-array deletion, invalid filenames/paths, assign/delete conflicts, and absence of deletion metadata in native output.
 
@@ -21,10 +23,10 @@
 ## 4. Template updates, activation and recovery
 
 - [x] 4.1 Replace populated-baseline rebasing with new-defaults composition using byte-preserved overrides. Verify successive updates, new defaults inherited only without overrides, explicit override precedence across upstream value/type changes, override removal, additions/deletions and redacted removed/type-changed upstream path diagnostics without a full-field allowlist.
-- [x] 4.2 Check staged document structure, provenance and matching images before active replacement; remove the resolved-candidate workflow. Verify malformed documents or deletion/provenance failures and image failures preserve the active generation, user fixes in overrides are read on retry, and concurrent source/default/override/deletion edits invalidate prepared activation.
+- [x] 4.2 Check staged document structure, runtime reference, selected source and matching images before active replacement; remove the resolved-candidate workflow. Verify malformed documents, deletion/reference failures and image failures preserve the active generation, user fixes are read on retry, and concurrent source/default/override/deletion edits invalidate prepared activation.
 - [x] 4.3 Refresh all five default templates together while retaining every override. Verify successive updates preserve override bytes and secrets, compose all native service documents before startup, and require no per-service provisioning list or historical baseline.
-- [x] 4.4 Snapshot and restore both sets, deletion declarations, manifest, initial-origin state, root reference and matching orchestration/source/image records. Verify reproducible effective settings after restore, interrupted activation recovery, strict incomplete-snapshot rejection and refusal to reuse an unassociated native directory.
-- [x] 4.5 Keep package and offline-bundle delivery limited to raw templates and provenance. Verify packed-package save-only initialization into both sets without network/engine access, exact selected-revision offline import, complete-asset checks before engine use and exclusion of overrides, credentials and populated runtime state.
+- [x] 4.4 Snapshot and restore both sets, optional deletion declarations, initial-origin state, root reference and matching orchestration/source/image records. Verify reproducible effective settings after restore, interrupted activation recovery, strict incomplete-snapshot rejection and explicit restore into an occupied selected root.
+- [x] 4.5 Keep package and offline-bundle delivery limited to verified source artifacts. Verify packed-package save-only initialization into both sets without engine access, exact selected-revision offline import, complete-asset checks before engine use and exclusion of overrides, credentials and populated runtime state.
 
 ## 5. Cleanup, documentation and acceptance
 
@@ -40,6 +42,11 @@
 
 ## 7. Operator-owned values and Configure-only model questions
 
-- [ ] 7.1 Remove all AMS configured-value validation for native TDAI and orchestration settings, including ports, DATA_DIR, engine/provider values, URLs, paths, prefixes, models and credentials. Preserve initial known-value/key generation, structural/provenance/ownership/concurrency/deletion checks, image integrity and actual runtime authentication/readiness. Configure collects models; Apply performs no model discovery, prompting, enforcement or reseeding.
-- [ ] 7.2 Make standalone configuration check load the composed installation and check only structural/provenance integrity. Add regressions for custom/empty native and orchestration values, complete Configured model persistence, no Apply model discovery/prompts, and actual execution failures without a preflight value policy.
+- [ ] 7.1 Remove all AMS configured-value validation for native TDAI and orchestration settings, including ports, DATA_DIR, engine/provider values, URLs, paths, prefixes, models and credentials. Preserve initial known-value/key generation, structural/reference/concurrency/deletion checks, source/image integrity and actual runtime authentication/readiness. Configure collects models; Apply performs no model discovery, prompting, enforcement or reseeding.
+- [ ] 7.2 Make standalone configuration check load the composed installation and check only structural/reference integrity. Add regressions for custom/empty native and orchestration values, complete Configured model persistence, no Apply model discovery/prompts, and actual execution failures without a preflight value policy.
 - [ ] 7.3 Refresh docs/specs and current tests/acceptance evidence for the expanded ownership boundary. Verify that custom prefixes are passed through without claiming helper-route support, existing `/v3` helper routes remain unchanged, and runtime failures remain distinguished from structural configuration errors.
+
+## 8. Optional Core service key
+
+- [x] 8.1 Remove AMS Core service-key generation and initial native seeding. Preserve an operator-supplied Core key and consumer credentials, user-key verification, Proxy admin.apiKey and Core administrator initialization. With no Core key, retain Proxy template client tokens and populate the initial Panel instance with the public local token; cover fresh setup and repeat Apply in focused tests.
+- [x] 8.2 Update current specs/operator guidance, rebuild and apply the explicitly approved local configuration with its Core service key cleared, and record actual authentication probes separately from provider inference. Preserve prior validation records and unfinished tasks.

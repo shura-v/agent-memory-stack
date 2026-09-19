@@ -1,3 +1,7 @@
+> The credential-pool and persistent-session lifecycle below is historical. The current request-scoped stateless contract is defined in [the stock integration change](../simplify-stock-tdai-integration/) and [the MCP specification](../../specs/server-mcp-gateway/spec.md).
+
+> Earlier implementation plan. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 ## Why
 
 Agents need a Knowledge MCP endpoint that runs entirely with the stack, on a workstation or VPS, without installing a local stdio adapter. Supergateway supplies the transport bridge, while AMS must preserve each memory user's Knowledge permissions across that bridge.

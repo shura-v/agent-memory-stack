@@ -2,35 +2,9 @@
 
 ## Purpose
 
-Let operators choose which Agent Memory Stack services run on each machine, with understandable defaults, explicit remote dependencies, and a reproducible Compose deployment that preserves existing data.
+Run the complete local Agent Memory Stack with native service settings, predictable setup and application, and preserved application data.
 
 ## Requirements
-
-### Requirement: Explainable local service selection
-
-Choosing Configure stack in `ams` SHALL enter stack setup without a service-selection question. A fresh installation SHALL configure the complete implemented local stack and its required support services, including MCP once its separate implementation is available. Existing explicit service selection and dependency modes SHALL remain authoritative. Advanced service selection SHALL remain editable through `.env`; setup SHALL display the resulting topology without asking the operator to choose services. Missing or invalid advanced settings SHALL produce actionable configuration guidance.
-
-#### Scenario: Accept a complete local stack
-- **WHEN** the operator configures a fresh installation
-- **THEN** setup derives the full implemented local stack without displaying service checkboxes
-
-#### Scenario: No local services selected
-- **WHEN** an explicit saved selection is empty
-- **THEN** setup reports an invalid AMS_SERVICES value to correct in .env without opening a checkbox prompt or changing running services
-
-#### Scenario: Proceed directly to installation
-- **WHEN** the operator chooses Configure stack
-- **THEN** setup asks installation and provider questions without service-selection or local-action prompts
-- **AND** local Core retains its administrator initialization flow and saved configuration remains applicable through the existing command
-
-#### Scenario: Enable MCP with split dependencies
-- **WHEN** an existing or manually edited configuration enables MCP with remote dependencies
-- **THEN** setup reads its Core and protected Knowledge dependencies from configuration, resolves its port automatically during apply, and does not ask for topology, addresses, or ports
-- **AND** missing required configuration prevents application with guidance to edit .env
-
-#### Scenario: Preserve an existing installation
-- **WHEN** setup reads an existing explicit service selection without MCP
-- **THEN** it preserves that selection, identities, credentials, and preferred ports instead of enabling extra services
 
 ### Requirement: Previous-question navigation
 
@@ -50,90 +24,50 @@ Stack setup SHALL support Escape to return to the previous question and Ctrl+C t
 - **WHEN** the user presses Escape at an optional post-install prompt
 - **THEN** the remaining prompt is cancelled without rerunning or rolling back installation
 
-### Requirement: Explicit dependency resolution
-
-Each configured service SHALL have every required dependency resolved to a local service or an explicitly configured remote service. Fresh setup SHALL derive local dependencies automatically. Existing or manually configured remote and disabled modes SHALL be preserved and validated without interactive placement or address questions. Setup SHALL explain missing configuration by field name, neither enabling unrequested services in existing installations nor inventing remote credentials.
-
-#### Scenario: MemoryProxy uses remote services
-- **WHEN** only MemoryProxy is selected locally
-- **THEN** setup reads the Core and model-upstream connections it uses from .env
-- **AND** Knowledge features require an explicit remote Knowledge connection or are disabled
-
-#### Scenario: Standalone model proxy
-- **WHEN** only CLIProxyAPI is selected
-- **THEN** setup deploys CLIProxyAPI and its necessary support services
-- **AND** it asks for no Core administrator, memory user, Z.ai model, Knowledge URL, or Panel URL
-
-#### Scenario: Knowledge completion is handled on another machine
-- **WHEN** Knowledge is selected locally and Panel is not selected locally
-- **THEN** setup requires a remote Panel connection in .env for completion callbacks and Core entity synchronization
-- **AND** it explains that polling alone does not complete this integration
-
-#### Scenario: Required dependency is unresolved
-- **WHEN** a selected service lacks a usable local or remote required dependency
-- **THEN** setup identifies that dependency and stops before applying the configuration
-
 ### Requirement: Relevant questions and visible defaults
 
-Interactive setup SHALL keep the initial menu visible. After the operator selects Configure stack, it SHALL perform the read-only complete-stack detection defined by host-installation. A detected complete stack SHALL exit the selected action with .env guidance before directory, provider, or other configuration questions. When no complete visible stack is detected, setup SHALL ask only for remaining interactive settings consumed by the deployment, including real LLM provider configuration and models. It SHALL NOT ask for service selection, stack service origins, host ports, remote placement, service-interface enablement, or local Core/CLIProxyAPI service keys. It SHALL derive fresh local addresses, preserve saved overrides, automatically reuse or generate local service keys, and explain automatic ports and manual external-domain configuration. Advanced remote endpoints and credentials SHALL be provided through .env and SHALL NOT default to invented values.
+Interactive setup SHALL keep the initial menu visible. After the operator selects Configure stack, it SHALL perform the read-only complete-stack detection defined by host-installation. A detected complete stack SHALL exit the selected action with native-configuration and orchestration .env guidance before provider or other configuration questions. When no complete visible stack is detected, setup SHALL ask only for remaining interactive settings consumed by the deployment, including source-appropriate internal model settings: real endpoint/key for external mode, and model entry during Configure stack for local CLIProxyAPI mode. It SHALL NOT ask for service selection, stack service origins, host ports, remote placement, service-interface enablement, configuration or data directories, or local Core/CLIProxyAPI service keys. It SHALL derive fresh local addresses, preserve saved overrides, automatically reuse or generate the CLIProxyAPI service key while leaving Core server.apiKey to native configuration, and explain automatic ports and manual external-domain configuration. Every installation SHALL contain all six local application services. Host publication SHALL remain in orchestration .env; native model endpoints and credentials SHALL remain in their owning overrides. External model APIs SHALL remain supported independently of stack placement.
 
 #### Scenario: Choose an installation directory
 - **WHEN** the operator chooses Configure stack and no complete visible stack is then detected
-- **THEN** the directory question suggests ./ams resolved from the current working directory unless a remembered target takes precedence
+- **THEN** setup retains `homedir()/.agent-memory-stack` for orchestration `.env`, `compose.yaml`, and `.ams/` without asking for a directory, and records the separate XDG-based native configuration root
+- **AND** the calling directory, `XDG_CONFIG_HOME`, and old `targets.json` files do not change the runtime path; XDG selects only an uninitialized native configuration root
+
+#### Scenario: Keep the data path without another question
+- **WHEN** setup configures a fresh, interrupted, or deferred installation
+- **THEN** it asks no configuration-directory or data-directory question
+- **AND** `DATA_DIR` defaults to `./data` relative to the Compose configuration directory, preserves any saved value exactly, and remains manually editable in `.env`
 
 #### Scenario: Change a local port during first setup
 - **WHEN** apply replaces an unavailable preferred host port automatically
-- **THEN** the corresponding generated local HTTP origin uses the resolved port without a port or URL prompt
+- **THEN** the corresponding automatically generated local origin follows the resolved port through retries and is finalized after successful activation without a port or URL prompt
+- **AND** an already explicit origin is preserved
 
 #### Scenario: Restore an installation's choices
-- **WHEN** no complete stack is detected and setup reads saved configuration from a partial or deferred installation
-- **THEN** service selection, dependency choices, addresses, and local service keys are reused without prompting
+- **WHEN** no complete stack is detected and setup reads saved configuration from an interrupted or deferred installation
+- **THEN** native overrides, addresses, and local service keys are reused without prompting
 - **AND** remaining interactive settings can be reviewed without revealing saved secrets
-
-#### Scenario: Select Core without Knowledge
-- **WHEN** an advanced saved configuration includes Core with Knowledge disabled and the guard permits setup
-- **THEN** setup asks for Core's provider configuration and memory model
-- **AND** it does not require a Knowledge model or Knowledge data configuration
 
 #### Scenario: Existing complete stack
 - **WHEN** all required application containers exist in one visible AMS project, including stopped containers
-- **THEN** the menu remains visible until Configure stack is selected, then setup exits with .env guidance before any configuration question
+- **THEN** the menu remains visible until Configure stack is selected, then setup exits with native-configuration and orchestration .env guidance before any configuration question
 
-### Requirement: Distinct service and client connection addresses
+#### Scenario: Change source before saving
+- **WHEN** the operator navigates back and changes the internal source
+- **THEN** dependent discovery and model-question state is recalculated for that source without rotating service keys or leaking secrets
 
-The deployment SHALL distinguish addresses used by containers to contact dependencies from addresses advertised to agents, tools, and browsers. Selected local dependencies SHALL use their Compose network addresses. Remote dependencies SHALL use explicit reachable HTTP/HTTPS endpoints with the required API path and authentication. HTTPS certificate verification SHALL remain enabled. Client-facing origins SHALL exclude credentials, paths, queries, and fragments, with protocol paths appended exactly once.
-
-#### Scenario: Split deployment across two machines
-- **WHEN** a container consumes a dependency on another machine
-- **THEN** its generated configuration uses the supplied remote service endpoint
-- **AND** it does not use a Compose service name or loopback address belonging to a different machine
-
-#### Scenario: Private Knowledge operations and public tools
-- **WHEN** Panel uses a remote Knowledge service
-- **THEN** setup reads the service connection required for Panel's operations separately from the protected tool origin advertised to agents
-- **AND** the public tool interface does not gain private administrative routes
-
-### Requirement: Authenticated Knowledge completion callbacks
-
-When Knowledge is enabled, its completion and progress callbacks SHALL reach the configured local or remote Panel using service authentication. Panel SHALL verify that authentication before processing either callback type. Completion SHALL preserve ready-entity synchronization into Core and the existing creator/asset context. The callback-owning Panel SHALL be paired with the same Knowledge backend and Core instance. Readiness checks SHALL detect a mismatched pairing using authenticated integration identity, not merely endpoint reachability. A running Knowledge process with a missing callback integration SHALL not be reported as fully ready for Wiki use.
-
-#### Scenario: Complete a split-host Wiki operation
-- **WHEN** Knowledge completes an operation initiated through a Panel on another machine
-- **THEN** its authenticated callback reaches that Panel and the corresponding ready entity is synchronized into Core
-- **AND** an unauthenticated callback cannot change progress or entity state
-
-#### Scenario: Callback owner targets a different deployment
-- **WHEN** the remote Panel endpoint is reachable but targets a different Knowledge backend or Core instance
-- **THEN** integration verification rejects the pairing and Wiki operations remain unavailable
-- **AND** no ready entity is written into the wrong Core instance
+#### Scenario: Select Core without Knowledge
+- **WHEN** orchestration settings attempt to select Core while disabling Knowledge
+- **THEN** these settings do not select a partial stack
+- **AND** the supported wizard configures both consumers and preserves their independent model choices
 
 ### Requirement: Operator-controlled cross-machine access
 
-Every published host port SHALL remain explicitly bound to `127.0.0.1`. A service intended for remote consumers SHALL expose only the required authenticated service interface through a documented, explicitly enabled loopback port. Setup SHALL show the intended audience and resolved port mapping without asking whether to enable a service interface. Panel, MemoryProxy, and MCP SHALL publish their loopback entry points by default when implemented and configured locally. Core, CLIProxyAPI, direct Knowledge HTTP tools, and Knowledge service interfaces SHALL remain unpublished by default. Explicit advanced exposure SHALL require .env configuration; a legacy Knowledge port/origin alone SHALL NOT enable publication. It SHALL preserve user/tool authorization and SHALL NOT configure external listeners, reverse proxies, tunnels, DNS, TLS certificates, or firewall rules. Raw service interfaces SHALL NOT be mistaken for user-facing tool APIs.
+Every published host port SHALL remain explicitly bound to `127.0.0.1`. Optional service publication SHALL use its documented, explicitly enabled loopback port. Native authentication SHALL remain owned by the selected upstream service, including its limitations; AMS MCP/access endpoints SHALL retain their separate user/resource authorization. Setup SHALL show the intended audience and resolved port mapping without asking whether to enable a service interface. Panel, MemoryProxy, and MCP SHALL publish their loopback entry points by default for every installation. Core, CLIProxyAPI, direct Knowledge HTTP tools, and Knowledge raw service interface SHALL remain unpublished by default. Explicit advanced exposure SHALL require .env configuration; a Knowledge port/origin alone SHALL NOT enable publication. AMS SHALL NOT configure external listeners, reverse proxies, tunnels, DNS, TLS certificates, or firewall rules. Raw service interfaces SHALL NOT be mistaken for user-facing tool APIs.
 
 #### Scenario: Connect a remotely consumed Core
 - **WHEN** the operator enables Core's service interface for consumers on another machine
-- **THEN** setup presents an authenticated loopback endpoint and the connection settings required by those consumers
+- **THEN** setup presents the loopback endpoint and any operator-configured Core service credential, identifying that Core service authentication is unset by default and does not protect every native route
 - **AND** external reachability remains the operator's responsibility
 
 #### Scenario: Ordinary complete local stack
@@ -142,140 +76,57 @@ Every published host port SHALL remain explicitly bound to `127.0.0.1`. A servic
 - **AND** Core, CLIProxyAPI, direct Knowledge HTTP tools, and raw Knowledge remain inside the Compose network
 - **AND** MCP reaches the protected Knowledge tools gateway internally
 
-### Requirement: Deployment-specific Compose and image requirements
-
-Setup SHALL generate one Compose project containing exactly the selected application services and necessary support services. Dependencies, health checks, configuration files, data mounts, and published ports SHALL match that deployment. Image preflight SHALL require valid content identities and compatible platforms only for images used locally. A supplied manifest containing additional images SHALL remain accepted without requiring those extra images in the local engine.
-
-#### Scenario: Use a subset of prepared images
-- **WHEN** the operator selects CLIProxyAPI and supplies its image and the required runtime image
-- **THEN** preflight and startup succeed without installing Core, Knowledge, Panel, or MemoryProxy images
-
-#### Scenario: Required image is missing
-- **WHEN** a selected local service or required support service has no usable image
-- **THEN** confirmed setup builds the missing required image before preflight, initialization, or service replacement
-- **AND** build failure leaves runtime configuration and running application containers unchanged while retaining saved desired settings
-
 ### Requirement: Automatic image preparation
 
-Setup SHALL manage image records internally without asking for a manifest path. After approval it SHALL verify reusable local images and build missing required images from pinned sources for the actual selected engine architecture. It SHALL preserve content identity and platform validation, and reject malformed records explicitly. Back navigation SHALL end before preparation begins. Existing installed image records SHALL remain available to the configuration snapshot before replacement.
+Setup SHALL manage complete seven-image records internally without asking for a manifest path. After approval it SHALL verify reusable local images and build missing or outdated images from pinned sources for the selected engine architecture. Content identity, platform and build provenance validation SHALL remain mandatory; malformed or incomplete imported records SHALL fail explicitly. Back navigation SHALL end before preparation. Existing installed image records SHALL remain available to the configuration snapshot before replacement.
 
 #### Scenario: First installation without image records
-- **WHEN** the user confirms installation in a directory without an image manifest
-- **THEN** setup builds the required application and helper images and continues through preflight and apply
-- **AND** no separate build command or manifest-path input is required
+- **WHEN** the user confirms installation without prepared images
+- **THEN** setup prepares all six application images and the shared runtime image before full-stack preflight and apply
+- **AND** no manifest-path input or separate build command is required
 
 #### Scenario: Selected Compose provider is unavailable
-- **WHEN** application starts with an unavailable saved Compose provider
-- **THEN** it reports how to configure that provider before administrator prompts or image builds
-- **AND** it retains saved settings and leaves running services unchanged
+- **WHEN** apply starts with an unavailable saved provider
+- **THEN** it reports provider configuration guidance before image builds or administrator prompts and preserves saved settings
 
 #### Scenario: Reuse or extend prepared images
-- **WHEN** image records exist for some or all required services
-- **THEN** setup reuses identities verified in the selected engine and builds only missing required images
-- **AND** unused recorded images are preserved without requiring them in the local engine
+- **WHEN** prepared images match the package inputs, source revision and selected engine
+- **THEN** setup reuses them and builds only missing or outdated members of the full image set
 
 #### Scenario: Cancel before image preparation
 - **WHEN** the user declines immediate application
-- **THEN** setup performs no image preparation or runtime configuration writes
-- **AND** desired configuration saved before the apply choice remains available
+- **THEN** setup preserves desired configuration without image preparation or runtime effects
 
 ### Requirement: Save before optional application
 
-Setup SHALL save reviewed desired configuration before asking `Apply configuration now?`, with Yes selected initially. No SHALL exit successfully with `Configuration saved` and the corresponding later-apply command. Saving SHALL require no image preparation, running container engine, or administrator key. Saved desired settings SHALL survive failed or cancelled application. Cancellation before the save boundary SHALL preserve previous settings.
+Setup SHALL save reviewed orchestration settings, complete defaults, persistent overrides, deletion declarations, and the native-root reference before asking `Apply configuration now?`, with Yes selected initially. No SHALL exit successfully with `Configuration saved` and the corresponding later-apply command. Saving SHALL require no image preparation, running container engine, or Core administrator login key. Saved desired settings SHALL survive failed or cancelled application. Cancellation before the save boundary SHALL preserve previous settings.
 
 #### Scenario: Save server configuration without starting services
 - **WHEN** the user selects No at immediate application
-- **THEN** `.env`, the chosen provider, and the server setup location are saved
+- **THEN** orchestration `.env`, complete defaults, persistent overrides, deletion declarations, the chosen provider, and the associated configuration/runtime locations are saved
 - **AND** no images are built, containers started, or administrator credentials requested
 
-### Requirement: Apply a remembered target
+Configure stack SHALL collect the model names for both internal consumers and persist their reviewed values. It SHALL NOT apply configured-value validators or invent model IDs. Apply SHALL use saved values without checking whether model fields are filled.
 
-The CLI SHALL provide `ams apply` without a server or path argument or repeated configuration questions. The Apply configuration menu action SHALL invoke the same saved-target application workflow and SHALL NOT run the Configure stack detection guard. It SHALL remember the absolute server installation location for the current OS user and use that location independently of the calling working directory. Missing or invalid saved configuration SHALL fail with actionable guidance. Immediate and deferred application SHALL use the same implementation and read current saved settings. The remembered target SHALL remain a convenience reference rather than an installation claim.
-
-After local Core becomes healthy, apply SHALL check for an active administrator through the existing bootstrap check. A successful check SHALL preserve the administrator and skip key generation and initialization regardless of application-container completeness. Only the explicit setup-required exit status SHALL invoke automatic key generation and the interactive handoff. Other check failures SHALL stop application without replacing credentials. Initial keys SHALL remain transient and SHALL NOT be persisted by setup. There SHALL be no manual administrator-key question.
-
-#### Scenario: Apply edited server settings later
-- **WHEN** the user edits saved .env and runs ams apply against initialized Core
-- **THEN** apply regenerates derived configuration and recreates containers without requesting or replacing the administrator key
-- **AND** valid images are reused and previous applied configuration remains available
-
-#### Scenario: Apply deferred first installation
-- **WHEN** healthy local Core reports that initial setup is required
-- **THEN** apply automatically generates a key and displays it with a single OK acknowledgement before administrator creation
-- **AND** initialization receives that key only through stdin
-
-#### Scenario: Resume a partial installation
-- **WHEN** only part of the configured stack exists but Core already has an active administrator
-- **THEN** apply starts the remaining services without key generation or administrator reinitialization
-
-#### Scenario: Existing-state check fails
-- **WHEN** the Core check fails for a reason other than its explicit setup-required status
-- **THEN** apply reports the failure without generating a key or attempting initialization or repair
-
-#### Scenario: Selected CLIProxyAPI account is already configured
-- **WHEN** local CLIProxyAPI has a non-disabled saved authorization record matching CLIPROXY_AUTH_PROVIDER with an access or refresh credential
-- **THEN** apply skips that provider's optional login question
-- **AND** credentials or model listings from another provider do not satisfy the selected-provider check
-
-#### Scenario: Selected account inspection fails
-- **WHEN** runtime or authorization-file inspection fails
-- **THEN** apply reports the failure instead of interpreting it as missing credentials or silently starting login
-
-### Requirement: Placement-aware initialization and readiness
-
-Startup SHALL order only local services and support jobs required by the resolved deployment. A deployment owning local Core SHALL perform its established initialization or existing-state check. When required peer configuration is complete but a peer is unavailable, setup SHALL offer an explicit staged start that reports the affected integration as pending and blocks its operations until verification succeeds. Missing configuration or rejected credentials SHALL not qualify for this exception. Consumers of remote Core SHALL verify authorization and readiness without creating or repairing remote users, teams, or agents. Remote connection checks SHALL run from the environment that will consume them. Health, authorization, provider login, and semantic memory SHALL be reported as separate results.
-
-#### Scenario: Remote Core is unavailable or unauthorized
-- **WHEN** a required remote Core check fails
-- **THEN** setup reports the failing connection without changing remote application state or exposing credentials
-- **AND** it does not claim that the deployment is ready
-
-#### Scenario: Bring up a fresh split Knowledge and Panel installation
-- **WHEN** both machines have complete connection settings but the opposite peer has not started yet
-- **THEN** the operator can explicitly start each local deployment with Wiki integration marked pending
-- **AND** rerunning verification after both start checks forward and callback paths and pairing before enabling Wiki operations
-
-#### Scenario: CLIProxyAPI account login
-- **WHEN** the operator starts an implemented provider-login flow for selected local CLIProxyAPI
-- **THEN** login runs on that machine and preserves one active token refresher
-- **AND** a remote CLIProxyAPI connection is not presented as a local login target
-
-### Requirement: Safe topology reconfiguration
-
-The selected services and dependency modes SHALL persist as editable installation settings alongside the existing configuration. Before saving, setup SHALL show local additions, removals, remote connections, and disabled features with secrets redacted. Canceling before save SHALL leave configuration and containers unchanged; declining immediate application SHALL retain saved desired settings without changing running containers. Confirmed application SHALL stop and remove only deselected containers owned by that installation, preserve application data and reusable credentials, and update consumers. Deselection SHALL NOT delete volumes, migrate data, or operate another machine. Locally owned service keys SHALL be stored independently from credentials used for a remote replacement, so switching back can reuse the original local state.
-
-#### Scenario: Move a service out of this installation
-- **WHEN** the user deselects a local dependency and supplies its remote replacement
-- **THEN** review identifies the local removal and the new remote connection
-- **AND** after confirmation only this project's obsolete containers are removed and existing data remains available
-
-#### Scenario: Re-enable a previous local service
-- **WHEN** a service is selected again with its preserved data
-- **THEN** setup reuses the existing state and credentials without reinitializing its identity
-
-### Requirement: Existing installations remain usable
-
-An installation created before service-selection metadata existed SHALL be interpreted as the existing complete local stack. Its current settings, identity, data paths, and service credentials SHALL be preserved. Conflicting or malformed selection settings SHALL fail with an actionable error instead of silently reverting to a default deployment.
-
-#### Scenario: Upgrade the existing stack
-- **WHEN** setup opens a pre-selection installation
-- **THEN** all five application services are initially selected and its existing values are retained
-- **AND** accepting the configuration keeps the same application identities and data
+#### Scenario: Save local model choices without an engine
+- **WHEN** the user selects local internal source and declines immediate application
+- **THEN** source, service credentials, account provider and configured model choices are saved without contacting an engine or model API
+- **AND** later apply reads these files without model discovery or questions
 
 ### Requirement: English documentation and build-and-start acceptance
 
-All new UI text, explanations, errors, planning artifacts, and updated user documentation SHALL be in English. Documentation SHALL explain the automatic local setup, derived ports, and .env configuration for external domains, service interfaces, and advanced split-machine deployments. Acceptance for this stage SHALL be limited to building the required images and starting the selected containers. Comprehensive topology, agent, MCP, provider, memory/Wiki, and recovery validation SHALL follow Supergateway and the remaining integration work. Existing functional requirements and runtime checks SHALL remain in effect.
+New UI text, errors, planning artifacts and updated operator documentation SHALL be in English. Documentation SHALL describe the fixed full stack, native defaults/overrides, automatic ports, optional loopback publication and external versus local internal LLM routing. It SHALL NOT advertise partial or split-machine deployments. Acceptance SHALL identify the exact complete image set, runtime, platform and tested full-stack startup paths. Process startup SHALL remain distinct from real OAuth, provider inference, agent behavior and semantic memory/Wiki validation.
 
 #### Scenario: Review the delivered setup experience
-- **WHEN** an operator follows the English README for a documented topology
-- **THEN** the wizard supplies the documented defaults and asks only the relevant questions
-- **AND** the report states which runtime, platform, connectivity, and provider scenarios were actually tested
+- **WHEN** acceptance is recorded
+- **THEN** it identifies checks run against the current six-service contract and explicitly separates unrun provider and semantic checks
+- **AND** earlier partial-deployment evidence is not counted as current acceptance
 
 ### Requirement: Automatic host port allocation
 
-Application SHALL prefer saved published ports or existing service defaults and automatically choose free alternatives when the selected Docker/Podman runtime cannot bind them. All published interfaces SHALL remain bound to 127.0.0.1. Allocation SHALL account for runtime-owned bindings, host listeners, duplicate choices, and the engine's actual publication context. Existing bindings owned by this installation's corresponding managed service SHALL be reused. Unrelated containers and listeners SHALL remain untouched. Only published interfaces SHALL receive host ports; the default allocation set is Panel, MemoryProxy, and MCP when implemented and local.
+Application SHALL prefer saved published ports or existing service defaults and automatically choose free alternatives when the selected Docker/Podman runtime cannot bind them. All published interfaces SHALL remain bound to 127.0.0.1. Allocation SHALL account for runtime-owned bindings, host listeners, duplicate choices, and the engine's actual publication context. Existing bindings owned by this installation's corresponding managed service SHALL be reused. Unrelated containers and listeners SHALL remain untouched. Only published interfaces SHALL receive host ports; the default allocation set is Panel, MemoryProxy, and MCP.
 
-Chosen ports SHALL be persisted before generating dependent configuration and reported to the operator. Reapplication SHALL preserve available saved ports. Only generated local origins SHALL follow port changes; external domains, provider bases, and container-internal endpoints SHALL be preserved. Confirmed bind races SHALL trigger bounded allocation retries; unrelated engine errors SHALL fail explicitly. Temporary allocation resources SHALL be cleaned up without changing unrelated services.
+Chosen ports SHALL be persisted before generating dependent configuration and reported to the operator. Reapplication SHALL preserve available saved ports. During initial startup, automatically generated origins SHALL follow each allocated port, including retries after bind conflicts. Their finalization SHALL be persisted only after successful container activation. Operator-supplied origins SHALL remain unchanged. Once configured, saved origin overrides SHALL remain explicit and unchanged on ordinary apply; later port changes SHALL report the new binding and any required origin adjustment, and actual service or runtime failures SHALL be reported without silently rewriting overrides. External domains, provider bases, and container-internal endpoints SHALL be preserved. No baseline comparison SHALL infer permission to rewrite an origin. Confirmed bind races SHALL trigger bounded allocation retries; unrelated engine errors SHALL fail explicitly. Temporary allocation resources SHALL be cleaned up without changing unrelated services.
 
 #### Scenario: Preferred port is busy
 - **WHEN** an unrelated container or host listener occupies the preferred published port
@@ -302,3 +153,159 @@ Chosen ports SHALL be persisted before generating dependent configuration and re
 #### Scenario: Preserve explicit external origin
 - **WHEN** allocation changes a host port for a service with an operator-configured Caddy domain
 - **THEN** its domain remains unchanged and output identifies the new proxy upstream port
+
+#### Scenario: Retry first startup after a port conflict
+- **WHEN** first startup encounters a bind conflict and retries with another host port
+- **THEN** automatically generated origins use the retry port and are finalized only after successful activation
+- **AND** operator-supplied origins remain unchanged
+
+#### Scenario: Change a port after initial origin configuration
+- **WHEN** a later apply allocates a different host port and an origin override already exists
+- **THEN** it preserves the origin and reports the new binding and any required adjustment
+- **AND** a failing connection is reported during runtime execution and the operator can correct its override
+
+### Requirement: Apply the fixed configuration
+
+The CLI SHALL provide `ams apply` without a server or path argument or repeated configuration questions. Apply SHALL NOT discover models, request model choices, validate configured model values or replace them. The Apply configuration menu action SHALL invoke the same fixed-directory application workflow and SHALL NOT run the Configure stack detection guard. Configure, apply, update, and connection details SHALL use `homedir()/.agent-memory-stack` for runtime orchestration independently of the calling working directory and `XDG_CONFIG_HOME`, without a public directory argument or target-pointer file. They SHALL use the saved native root reference or, when that reference is missing, complete composable files at the selected native root, without changing runtime identity or data paths. Missing configuration or invalid document syntax SHALL fail with actionable guidance. Immediate and deferred application SHALL use the same implementation and read current saved settings.
+
+After local Core becomes healthy, apply SHALL check for an active administrator through the existing bootstrap check. A successful check SHALL preserve the administrator and skip key generation and initialization regardless of application-container completeness. Only the explicit setup-required exit status SHALL invoke automatic key generation and the interactive handoff. Other check failures SHALL stop application without replacing credentials. Initial keys SHALL remain transient and SHALL NOT be persisted by setup. There SHALL be no manual administrator-key question.
+
+#### Scenario: Apply edited server settings later
+- **WHEN** the user edits saved overrides or orchestration .env and runs ams apply against initialized Core
+- **THEN** apply composes defaults with current overrides, checks structural integrity and consumes the effective settings, preserves operator edits, and recreates affected containers without requesting or replacing the Core administrator key
+- **AND** valid images are reused and previous applied configuration remains available
+
+#### Scenario: Apply deferred first installation
+- **WHEN** healthy local Core reports that initial setup is required
+- **THEN** apply automatically generates a key and displays it with a single OK acknowledgement before administrator creation
+- **AND** initialization receives that key only through stdin
+
+#### Scenario: Resume a partial installation
+- **WHEN** only part of the configured stack exists but Core already has an active administrator
+- **THEN** apply starts the remaining services without key generation or administrator reinitialization
+
+#### Scenario: Existing-state check fails
+- **WHEN** the Core check fails for a reason other than its explicit setup-required status
+- **THEN** apply reports the failure without generating a key or attempting initialization or repair
+
+#### Scenario: Selected CLIProxyAPI account is already configured
+- **WHEN** local CLIProxyAPI has a non-disabled saved authorization record matching CLIPROXY_AUTH_PROVIDER with an access or refresh credential
+- **THEN** apply skips that provider's optional login question
+- **AND** credentials or model listings from another provider do not satisfy the selected-provider check
+
+#### Scenario: Selected account inspection fails
+- **WHEN** runtime or authorization-file inspection fails
+- **THEN** apply reports the failure instead of interpreting it as missing credentials or silently starting login
+
+#### Scenario: Apply saved model configuration
+- **WHEN** saved configuration supplies Core and Knowledge model values
+- **THEN** apply passes them through without discovery, model questions or model-policy validation
+- **AND** model edits are made through native overrides or Configure stack
+
+#### Scenario: Empty model values during apply
+- **WHEN** one or both model fields are empty, absent or changed after setup
+- **THEN** interactive and noninteractive apply both read and apply the saved files without prompting for models or rejecting their values
+- **AND** native loading and runtime execution determine the outcome
+
+#### Scenario: Native value conflicts with changed topology
+- **WHEN** an operator edits a native connection or path alongside orchestration settings
+- **THEN** apply preserves and consumes those values without a semantic preflight policy; actual runtime checks determine whether the stack starts
+- **AND** it does not silently restore the wizard's former value or replace the operator's value
+
+### Requirement: Fixed complete local service composition
+
+Configure stack SHALL always configure Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI and MCP together with their three required support containers. Setup SHALL display this fixed composition without service-selection questions. Service selection, dependency placement and disabled-service modes SHALL NOT be configurable through orchestration settings. Removed service-selection and remote-placement fields SHALL NOT control deployment composition or trigger a conversion.
+
+#### Scenario: Configure the complete local stack
+- **WHEN** the operator configures a fresh installation or reapplies saved settings
+- **THEN** all six application services and their support containers belong to one local Compose project
+- **AND** setup offers both internal LLM source choices independently of service composition
+
+#### Scenario: Reject removed deployment controls
+- **WHEN** orchestration settings include AMS_SERVICES, AMS_DEPLOYMENT_VERSION, placement-mode or REMOTE_* fields
+- **THEN** the installation retains its fixed complete local composition
+- **AND** no migration, subset deployment or remote replacement is inferred
+
+### Requirement: Local stack dependency resolution
+
+Initial setup SHALL populate known stack dependencies with local Compose addresses. Effective native documents SHALL own subsequent service endpoints and credentials; AMS SHALL preserve edited values without enforcing matching connections. Core and Knowledge SHALL retain separate model choices and MAY use a configured external model API when INTERNAL_LLM_SOURCE=external. External model routing SHALL NOT remove CLIProxyAPI or any other stack service.
+
+#### Scenario: Resolve the local dependency graph
+- **WHEN** a complete installation is configured
+- **THEN** MemoryProxy, Panel, Knowledge and MCP use the installation's local Core and corresponding local service dependencies
+- **AND** all native consumer documents are initialized and composed together
+
+#### Scenario: Choose an external internal-model provider
+- **WHEN** the operator selects external internal LLM routing
+- **THEN** Core and Knowledge use their configured native model API connections while all six services remain local
+
+#### Scenario: Required dependency configuration is invalid
+- **WHEN** an edited native connection fails during actual service startup or authentication
+- **THEN** apply reports the actual runtime failure and preserves coherent recovery information
+
+### Requirement: Local service and public client addresses
+
+The deployment SHALL distinguish Compose addresses used by containers from origins advertised to agents, tools and browsers. Initial stack dependencies SHALL use local Compose services. Operator-edited endpoints, API prefixes, credentials and public origins SHALL pass through without an AMS shape or equality check. Native transport and helper contracts SHALL determine how those values are used; accepting a custom prefix SHALL NOT imply automatic helper-route propagation.
+
+#### Scenario: Container and browser use different addresses
+- **WHEN** Panel or MemoryProxy is published through a user-managed reverse proxy
+- **THEN** public guidance uses its configured origin while local service dependencies retain Compose addresses
+
+#### Scenario: Separate private Knowledge operations from tools
+- **WHEN** Panel performs Knowledge operations and an agent requests Knowledge tools
+- **THEN** Panel uses the stock Knowledge API directly and the agent uses MCP or the explicitly published protected tools gateway
+- **AND** public tools do not expose private administrative routes
+
+### Requirement: Safe full-stack configuration changes
+
+The installation's composition SHALL remain the complete local stack. Before saving, setup SHALL show its fixed services, required helpers, published interfaces and effective settings with secrets redacted. Cancellation before saving SHALL leave configuration and containers unchanged; declining application SHALL retain desired settings without changing running containers. Applying edited native overrides or orchestration settings SHALL preserve data and reusable credentials and recreate affected local containers. It SHALL NOT introduce service selection, remote replacements, data migration or operations on another machine.
+
+#### Scenario: Review a configuration edit
+- **WHEN** the operator changes a model, publication setting or native override
+- **THEN** review retains the full local service composition and redacts secrets
+- **AND** later apply preserves application identity, data and reusable keys
+
+#### Scenario: Resume an interrupted full-stack installation
+- **WHEN** only some expected containers exist after an interrupted apply
+- **THEN** retry targets the complete stack and reuses initialized Core state without rotating its administrator
+
+### Requirement: Native Knowledge completion callbacks
+
+Knowledge and Panel SHALL communicate using the selected TDAI revision's native connection settings and callback behavior. AMS SHALL NOT inject callback authentication, private identity endpoints, persistent integration UUIDs or deployment-pairing checks into either service. Documentation SHALL identify callback authentication as upstream behavior rather than an AMS guarantee.
+
+#### Scenario: Complete a Knowledge operation
+- **WHEN** stock Knowledge sends progress or completion to its configured stock Panel
+- **THEN** the native callback handler determines the result without an AMS service-protocol dependency
+- **AND** failures are reported without patching either application
+
+### Requirement: Complete stock stack composition
+
+Every installation SHALL prepare all six applications: Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI and MCP. Required AMS helpers SHALL be limited to configuration delivery, bootstrap and the external access boundary. Native service connections SHALL use the local Compose network by default; Panel SHALL connect directly to Knowledge. The removed `knowledge-service` proxy and private identity protocol SHALL not be required.
+
+Setup SHALL generate one Compose project containing all six application services (Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI and MCP) and all three support containers (config, bootstrap and access). Dependencies, health checks, configuration files, data mounts, and published ports SHALL match that deployment. All TDAI services SHALL consume the effective configuration composed from defaults and overrides through read-only mounts or an equivalent faithful runtime copy and their native file/env interfaces. Runtime adaptation SHALL preserve native options and literal secrets; generated environment transport SHALL derive only from effective native values and SHALL NOT become a third independent configuration set. Image preparation, preflight, export and import SHALL require the complete seven-image set: the six application images and the shared runtime image. Export and import SHALL reject incomplete manifests before engine operations. Setup MAY use incomplete local build records while preparing missing images, but SHALL produce and validate a complete manifest before preflight or configuration activation. Matching images SHALL remain reusable; only missing or outdated images SHALL require rebuilding. Public host listeners SHALL remain bound to loopback by default.
+
+#### Scenario: Prepare the full stack
+- **WHEN** a fresh installation is configured and applied
+- **THEN** all six applications are included with their required helpers and native configuration mounts
+- **AND** service selection or remote placement metadata does not change the composition
+
+#### Scenario: Required image is missing
+- **WHEN** an application or helper lacks a usable image
+- **THEN** image preparation completes before service replacement or reports failure while preserving the running installation
+
+#### Scenario: Apply an additional native option
+- **WHEN** the operator adds a supported upstream setting that is absent from the AMS wizard
+- **THEN** the service receives that setting without AMS dropping it or requiring an AMS schema extension
+
+### Requirement: Native process readiness and initialization
+
+AMS SHALL order the complete local stack using native process health and one-shot completion. Core initialization or existing-administrator checks SHALL use stock APIs and preserve the current credential lifecycle. Readiness SHALL NOT depend on injected `/ams/identity` endpoints or pairing protocols. Process health, service authentication, account authorization and functional tool/model behavior SHALL be reported separately. After process startup in either internal-model mode, Apply SHALL inspect the selected CLIProxyAPI account and offer its login flow when credentials are missing; this SHALL not discover or choose models. Upstream errors SHALL remain visible without staged split-host behavior or code corrections.
+
+#### Scenario: Healthy stock processes
+- **WHEN** the native services become healthy and required initialization completes
+- **THEN** AMS reports process startup success without contacting an AMS-only TDAI endpoint
+- **AND** it does not infer successful model requests or callbacks from health alone
+
+#### Scenario: Native operation fails after startup
+- **WHEN** a healthy stock service rejects an operation because of configuration or an upstream defect
+- **THEN** AMS records that operation as failed without changing TDAI or claiming complete integration success

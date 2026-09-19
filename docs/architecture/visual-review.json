@@ -5,8 +5,8 @@
       "name": "stack",
       "diagram_type": "architecture",
       "output": "stack.html",
-      "specification_sha256": "f5f7c0b72989241c77ac1beea3f08190f25b135e3c89ec0e2ff45f5715fab81b",
-      "artifact_sha256": "001adb5f4f1156a4e7fb37588b24a5788ac1d379909b1fab6c45402f5b4f5a3b",
+      "specification_sha256": "81c96d0ffaa704ef31e3787c053dc94b6cbb8cc3591bb2b5e0c0a8162b21a8ba",
+      "artifact_sha256": "42a5baeca16ec8dd3fe912a3bd0ebe908d7321d678a730234e394ce319a343cc",
       "validation": {
         "checksPassed": 9,
         "checkCount": 9,
@@ -16,7 +16,7 @@
         "warnings": 0
       },
       "visual_review": "passed",
-      "correction_rounds": 1,
+      "correction_rounds": 0,
       "manually_inspected_screenshots": [
         "stack.visual-check.1440x900.dark.png",
         "stack.visual-check.2048x1320.light.png"
@@ -44,19 +44,18 @@
         }
       ],
       "notes": [
-        "Default READ view with motion disabled.",
-        "Inspected node and card fit, route labels, themes, and overall composition.",
-        "No clipping or overlapping labels observed. Small-screen details can be enlarged with viewer zoom.",
-        "One visual correction shortened the explanatory cards to remove 17 pixels of overflow at 1440 x 900.",
-        "The two internal-model branches are mutually exclusive configuration alternatives; MCP topology remains unchanged."
+        "Default READ view, Classic preset, motion disabled.",
+        "Inspected dark and light node/card fit, route labels, desktop balance and absence of clipping.",
+        "Labels can be enlarged with viewer zoom; automated desktop readability passed at every checked size.",
+        "Direct Panel–Knowledge traffic is described in the Stock TDAI card; the arrows focus on agent and model traffic."
       ]
     },
     {
       "name": "mcp",
       "diagram_type": "architecture",
       "output": "mcp.html",
-      "specification_sha256": "978c668a657ba8f12f167e6af418abcff497a56a1fe0b0f1971cb73acb49f506",
-      "artifact_sha256": "4dfa801f5af92473e9306b5b0e6909ee785af3b9b2231fb6511cefff363347c4",
+      "specification_sha256": "8726a712bfdf466060beeac29cb4f35342951091bdcb46df465e96a64be1e572",
+      "artifact_sha256": "d9d470624ac6b9dc39d802001411f41d29f681613db7ed89e76be66d219d119e",
       "validation": {
         "checksPassed": 9,
         "checkCount": 9,
@@ -94,10 +93,11 @@
         }
       ],
       "notes": [
-        "Default READ view with motion disabled.",
-        "Inspected node and card fit, route labels, themes, and overall composition.",
-        "No clipping or overlapping labels observed. Small-screen details can be enlarged with viewer zoom.",
-        "MCP topology and behavior labels are unchanged; obsolete commit-pinned source links were removed."
+        "Default READ view, Classic preset, motion disabled.",
+        "Inspected dark and light node/card fit, route labels, desktop balance and absence of clipping.",
+        "Labels can be enlarged with viewer zoom; automated desktop readability passed at every checked size.",
+        "Official SDK transports connect to one unchanged stdio process per HTTP POST; completion or disconnect closes the child.",
+        "Separated the access bridge ports after manual review: stock MCP enters from the right, authorization leaves from the top, and Knowledge forwarding leaves to the left."
       ]
     }
   ],
@@ -105,7 +105,7 @@
     "path": "../images/agent-memory-stack-overview.png",
     "source": "stack.visual-check.2048x1320.light.png",
     "method": "Unmodified headless screenshot of the delivered Archify HTML.",
-    "sha256": "1a22af35baac7778a92e731196887cd3931d2aafeb520ef62a34bbdf1d57fd7e"
+    "sha256": "9d3f2649d972d598f175bb13616deea5b26d72edbb2762cf4fc5a767faa47ced"
   },
   "scope": "Documentation and rendered composition only; no application tests, container operations, live inference, or deployment validation performed."
 }

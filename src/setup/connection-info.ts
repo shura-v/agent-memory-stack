@@ -61,11 +61,6 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
     ...listener('panel'), ...publicOrigin('panel', 'PANEL_PUBLIC_URL'),
     'Sign in with an administrator key:', ...userCredentials(true),
   ]);
-  block('MemoryProxy — API for your agent with memory', [
-    ...listener('memory-proxy'), ...publicOrigin('memory-proxy', 'MEMORY_PROXY_PUBLIC_URL'),
-    'Agent Base URL: copy the native endpoint from Panel → API Keys → Client Access Endpoint.',
-    ...userCredentials(),
-  ]);
   const configuration = await readNativeConfiguration(directory);
   const native = configuration ? composeNativeConfiguration(configuration) : undefined;
   const fieldSource = (file: NativeFileName, path: string[]): string => {
@@ -85,13 +80,9 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
   ]);
   const admin = native ? proxyAdminKey(native) : undefined;
   if (admin) block('MemoryProxy — native administration', [`Administrative key (${fieldSource('proxy.yaml', ['admin', 'apiKey'])}):`, admin]);
-  block('MCP — Knowledge tools for your agent', [
-    ...listener('mcp', '/mcp'), 'Transport: Streamable HTTP', 'Path: /mcp',
-    'Search Wiki and code resources. Use one of these user API keys:', ...userCredentials(),
-  ]);
   block('Core — internal memory service', [
     'Compose URL: http://core:8420', ...(port('core') ? listener('core') : ['Host access: not published.']),
-    ...(native?.['core.yaml'] ? [`Service key (${fieldSource('core.yaml', ['server', 'apiKey'])}):`, env.CORE_API_KEY] : credential('CORE_API_KEY', 'Service key')),
+    ...(!env.CORE_API_KEY ? ['Service authentication: disabled (native server.apiKey is empty).'] : native?.['core.yaml'] ? [`Service key (${fieldSource('core.yaml', ['server', 'apiKey'])}):`, env.CORE_API_KEY] : credential('CORE_API_KEY', 'Service key')),
   ]);
   block('CLIProxyAPI — model provider access', [
     'Compose API base URL: http://cli-proxy-api:8317/v1', ...(port('cli-proxy-api') ? listener('cli-proxy-api', '/v1') : ['Host access: not published.']),
@@ -131,8 +122,19 @@ export async function showConnectionDetails(ui: Interaction, directory: string,
     ...credential('LLM_API_KEY', 'API key'),
   ]);
   block('Local or remote?', [
-    'On this machine: use the localhost URLs above.',
+    'On this machine: use the localhost URLs.',
     'On another computer: proxy each published port through Caddy and use your HTTPS domains. Preserve the request paths.',
     'Configure MemoryProxy, MCP, or both.',
   ]);
+  ui.print('========================================\nAgent connections\n========================================\n');
+  block('MemoryProxy — API for your agent with memory', [
+    ...listener('memory-proxy'), ...publicOrigin('memory-proxy', 'MEMORY_PROXY_PUBLIC_URL'),
+    'Agent Base URL: copy the native endpoint from Panel → API Keys → Client Access Endpoint.',
+    ...userCredentials(),
+  ]);
+  block('MCP — Knowledge tools for your agent', [
+    ...listener('mcp', '/mcp'), 'Transport: Streamable HTTP', 'Path: /mcp',
+    'Search Wiki and code resources. Use one of these user API keys:', ...userCredentials(),
+  ]);
+  ui.print('Agent setup guides: https://github.com/shura-v/agent-memory-stack/blob/main/docs/agent-profiles/README.md\n');
 }

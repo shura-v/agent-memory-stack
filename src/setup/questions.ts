@@ -11,7 +11,7 @@ import { accountProviders } from '../config/providers.js';
 // Advanced networking is configured in .env, never through the wizard.
 const setupFields = new Set([
   'LLM_BASE_URL', 'LLM_API_KEY', 'MEMORY_LLM_MODEL', 'KNOWLEDGE_LLM_MODEL',
-  'CORE_API_KEY', 'CLIPROXY_API_KEY', 'MEMORY_PROMPT_MODE', 'LOG_LEVEL',
+  'CLIPROXY_API_KEY', 'MEMORY_PROMPT_MODE', 'LOG_LEVEL',
 ]);
 
 export async function serverQuestions(ui: Interaction, existing: Record<string, string>, { listModels = discoverModels }: { listModels?: ModelDiscovery } = {}): Promise<Record<string, string>> {
@@ -38,7 +38,8 @@ export async function serverQuestions(ui: Interaction, existing: Record<string, 
     if (field.role) {
       continue;
     }
-    if (field.secret && previous && await ui.confirm(`keep:${field.name}`, `Keep existing ${field.label}?`, true)) {
+    const canKeep = field.name !== 'LLM_API_KEY' || values.LLM_BASE_URL === existing.LLM_BASE_URL;
+    if (field.secret && previous && canKeep && await ui.confirm(`keep:${field.name}`, `Keep existing ${field.label}?`, true)) {
       values[field.name] = previous;
       continue;
     }
@@ -58,7 +59,10 @@ export async function serverQuestions(ui: Interaction, existing: Record<string, 
         }
         if (!models.length) ui.note('No model list is available. Enter the model names manually.', 'Models');
       }
-      values[field.name] = await selectModel(ui, field, models, initial);
+      const modelField = localModels && field.name === 'MEMORY_LLM_MODEL'
+        ? { ...field, label: `${field.label} (${values.CLIPROXY_AUTH_PROVIDER === 'claude' ? 'Anthropic' : 'OpenAI'})` }
+        : field;
+      values[field.name] = await selectModel(ui, modelField, models, initial);
       continue;
     }
     if (field.name === 'MEMORY_PROMPT_MODE') {

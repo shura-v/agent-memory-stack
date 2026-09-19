@@ -1,3 +1,5 @@
+> Synchronized with the current main specification on 2026-09-19. Overlapping requirements reflect the final stock-TDAI contract; prior design narratives remain historical. Archive this already-synchronized change without applying its deltas again.
+
 ## ADDED Requirements
 
 ### Requirement: Native Knowledge completion callbacks
@@ -11,7 +13,9 @@ Knowledge and Panel SHALL communicate using the selected TDAI revision's native 
 
 ### Requirement: Complete stock stack composition
 
-Every installation SHALL prepare all six applications: Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI and MCP. Required AMS helpers SHALL be limited to configuration delivery, bootstrap and the external access boundary. Native service connections SHALL use the local Compose network by default; Panel SHALL connect directly to Knowledge. The removed `knowledge-service` proxy and private identity protocol SHALL not be required. Image checks SHALL cover all six application images and the shared runtime image. Public host listeners SHALL remain bound to loopback by default.
+Every installation SHALL prepare all six applications: Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI and MCP. Required AMS helpers SHALL be limited to configuration delivery, bootstrap and the external access boundary. Native service connections SHALL use the local Compose network by default; Panel SHALL connect directly to Knowledge. The removed `knowledge-service` proxy and private identity protocol SHALL not be required.
+
+Setup SHALL generate one Compose project containing all six application services (Core, Knowledge, Panel, MemoryProxy, CLIProxyAPI and MCP) and all three support containers (config, bootstrap and access). Dependencies, health checks, configuration files, data mounts, and published ports SHALL match that deployment. All TDAI services SHALL consume the effective configuration composed from defaults and overrides through read-only mounts or an equivalent faithful runtime copy and their native file/env interfaces. Runtime adaptation SHALL preserve native options and literal secrets; generated environment transport SHALL derive only from effective native values and SHALL NOT become a third independent configuration set. Image preparation, preflight, export and import SHALL require the complete seven-image set: the six application images and the shared runtime image. Export and import SHALL reject incomplete manifests before engine operations. Setup MAY use incomplete local build records while preparing missing images, but SHALL produce and validate a complete manifest before preflight or configuration activation. Matching images SHALL remain reusable; only missing or outdated images SHALL require rebuilding. Public host listeners SHALL remain bound to loopback by default.
 
 #### Scenario: Prepare the full stack
 - **WHEN** a fresh installation is configured and applied
@@ -22,9 +26,13 @@ Every installation SHALL prepare all six applications: Core, Knowledge, Panel, M
 - **WHEN** an application or helper lacks a usable image
 - **THEN** image preparation completes before service replacement or reports failure while preserving the running installation
 
+#### Scenario: Apply an additional native option
+- **WHEN** the operator adds a supported upstream setting that is absent from the AMS wizard
+- **THEN** the service receives that setting without AMS dropping it or requiring an AMS schema extension
+
 ### Requirement: Native process readiness and initialization
 
-AMS SHALL order the complete local stack using native process health and one-shot completion. Core initialization or existing-administrator checks SHALL use stock APIs and preserve the current credential lifecycle. Readiness SHALL NOT depend on injected `/ams/identity` endpoints or pairing protocols. Process health, service authentication, account authorization and functional tool/model behavior SHALL be reported separately. Upstream errors SHALL remain visible without staged split-host behavior or code corrections.
+AMS SHALL order the complete local stack using native process health and one-shot completion. Core initialization or existing-administrator checks SHALL use stock APIs and preserve the current credential lifecycle. Readiness SHALL NOT depend on injected `/ams/identity` endpoints or pairing protocols. Process health, service authentication, account authorization and functional tool/model behavior SHALL be reported separately. After process startup in either internal-model mode, Apply SHALL inspect the selected CLIProxyAPI account and offer its login flow when credentials are missing; this SHALL not discover or choose models. Upstream errors SHALL remain visible without staged split-host behavior or code corrections.
 
 #### Scenario: Healthy stock processes
 - **WHEN** the native services become healthy and required initialization completes
@@ -34,7 +42,6 @@ AMS SHALL order the complete local stack using native process health and one-sho
 #### Scenario: Native operation fails after startup
 - **WHEN** a healthy stock service rejects an operation because of configuration or an upstream defect
 - **THEN** AMS records that operation as failed without changing TDAI or claiming complete integration success
-
 
 ## REMOVED Requirements
 

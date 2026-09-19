@@ -28,7 +28,7 @@ export function validateTdaiSource(value: unknown): SourceLock {
 
 /** Installation updates override only Tencent sources, never packaged build inputs. */
 export async function loadSourceLock(projectDir?: string, root = packageRoot): Promise<UpstreamLock> {
-  const lock = JSON.parse(await readFile(resolve(root, 'upstream.lock.json'), 'utf8')) as UpstreamLock;
+  const lock = JSON.parse(await readFile(resolve(root, 'vendor/upstream.lock.json'), 'utf8')) as UpstreamLock;
   if (!projectDir) return lock;
   let raw: string;
   try { raw = await readFile(resolve(projectDir, '.ams/tdai-source.json'), 'utf8'); }

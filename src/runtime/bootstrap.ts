@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 type JsonObject = Record<string, unknown>;
 export interface InitializeOptions {
   coreUrl?: string;
-  coreApiKey: string;
+  coreApiKey?: string;
   adminKey?: string;
   mode: 'initialize' | 'check';
   serviceId?: string;
@@ -50,9 +50,8 @@ function validateAdminKey(key: unknown): asserts key is string {
 }
 
 /** Check existing state or explicitly initialize using a transient supplied key. */
-export async function initialize({ coreUrl = 'http://core:8420', coreApiKey, adminKey, mode,
+export async function initialize({ coreUrl = 'http://core:8420', coreApiKey = '', adminKey, mode,
   serviceId = 'ams', fetchImpl = globalThis.fetch }: InitializeOptions): Promise<BootstrapResult> {
-  if (!nonempty(coreApiKey) || !coreApiKey.trim()) throw new BootstrapError('CORE_API_KEY is required.');
   if (!nonempty(serviceId) || !serviceId.trim()) throw new BootstrapError('SERVICE_ID is required.');
   if (mode !== 'initialize' && mode !== 'check') throw new BootstrapError('Bootstrap mode must be initialize or check.');
   if (mode === 'initialize') validateAdminKey(adminKey);
@@ -69,7 +68,7 @@ export async function initialize({ coreUrl = 'http://core:8420', coreApiKey, adm
     try {
       response = await fetchImpl(new URL(endpoint, base), {
         method: 'POST', headers: {
-          'content-type': 'application/json', authorization: `Bearer ${coreApiKey}`,
+          'content-type': 'application/json', ...(coreApiKey ? { authorization: `Bearer ${coreApiKey}` } : {}),
           'x-tdai-service-id': serviceId,
           ...(options.userKey ? { 'x-tdai-user-key': options.userKey } : {}),
         },

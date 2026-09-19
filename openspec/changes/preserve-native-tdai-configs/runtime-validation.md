@@ -1,3 +1,5 @@
+> Historical validation record. Current behavior is specified in [the synchronized main specs](../../specs/) and [the stock integration change](../simplify-stock-tdai-integration/). The complete six-application stack, three AMS helpers, source-acquired flat defaults/overrides, Configure-only model choices and unmodified TDAI supersede conflicting statements below. Past checks establish only their recorded environment and implementation.
+
 # Full-stack native configuration runtime validation
 
 Date: 2026-09-19. Host: macOS; engine: Podman 6.1.1; container platform: `linux/arm64`; Compose provider: `uvx podman-compose` with task-local caches. TDAI revision: `0468a2a5b50eaafc54758ed1e2e6609472e5b6ce`.

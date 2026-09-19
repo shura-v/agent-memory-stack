@@ -1,5 +1,5 @@
 import { installNativeSourceFixture } from './fixtures/native-source.mjs';
-import { readInstallationEnv, orchestrationEnv, readNativeDocuments } from '../dist/config/native-state.js';
+import { readInstallationEnv, orchestrationEnv, readNativeDocuments, readNativeConfiguration } from '../dist/config/native-state.js';
 async function readEnv(path) { return readInstallationEnv(dirname(path)); }
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { parse as parseYaml } from 'yaml';
-import { setupServer as runSetupServer } from '../dist/setup/server.js';
+import { setupServer as runSetupServer, applyServer } from '../dist/setup/server.js';
 import { serverQuestions as askServerQuestions } from '../dist/setup/questions.js';
 import { resolveDeployment, serviceNames } from '../dist/deployment/model.js';
 import { fields, generateKey, resolveSettings } from '../dist/config/settings.js';
@@ -85,6 +85,62 @@ test('setup writes into its configured directory without directory or data-path 
   assert.ok(!ui.asked.includes('directory'));
   assert.ok(!ui.asked.includes('DATA_DIR'));
 });
+test('Configure provisions native files alongside client targets and unrelated configuration', async t => {
+  const directory = await fixture(t);
+  const nativeRoot = join(process.env.XDG_CONFIG_HOME, 'agent-memory-stack');
+  const existing = { 'targets.json': '{"targets":[]}\n', 'README.txt': 'Operator notes stay unchanged.\n' };
+  await mkdir(nativeRoot, { recursive: true });
+  for (const [name, contents] of Object.entries(existing)) await writeFile(join(nativeRoot, name), contents);
+  await setupServer(interaction({ apply: false }), { directory, nativeRoot });
+  const documents = await readNativeDocuments(directory);
+  assert.equal(parseYaml(documents['core.yaml']).llm.model, settings.MEMORY_LLM_MODEL);
+  assert.match(parseYaml(documents['proxy.yaml']).admin.apiKey, /^sk-ams-proxy-admin-/);
+  for (const [name, contents] of Object.entries(existing)) assert.equal(await readFile(join(nativeRoot, name), 'utf8'), contents);
+});
+for (const action of ['Configure', 'Apply']) for (const customRoot of [false, true]) {
+  test(`${action} reuses existing native files with a missing association at the ${customRoot ? 'custom' : 'default'} root`, async t => {
+    const directory = await fixture(t);
+    const nativeRoot = customRoot ? join(directory, 'custom-native') : undefined;
+    const runtime = () => ({
+      hasProviderAuthorization: async () => true,
+      preflight: async () => {}, snapshot: async () => {}, apply: async () => {},
+      login: async () => assert.fail('authorization already available'),
+    });
+    await setupServer(interaction(), { directory, nativeRoot, runtime });
+    const before = await readNativeConfiguration(directory);
+    const beforeEnv = await readInstallationEnv(directory);
+    await rm(join(directory, '.ams/native-config.json'));
+    await rm(join(directory, '.ams/last-applied-inputs.json'));
+    const ui = interaction({ apply: false, useDefaults: true });
+    if (action === 'Configure') await setupServer(ui, { directory, nativeRoot });
+    else await applyServer(ui, directory, { nativeRoot, runtime, prepareImages: async () => structuredClone(manifest) });
+    const after = await readNativeConfiguration(directory);
+    assert.deepEqual(after.defaults, before.defaults);
+    assert.deepEqual(after.overrides, before.overrides);
+    assert.equal(after.deletions, before.deletions);
+    assert.equal(after.root, before.root);
+    assert.equal(after.originsFinalized, true);
+    assert.deepEqual(await readInstallationEnv(directory), beforeEnv);
+    const reference = JSON.parse(await readFile(join(directory, '.ams/native-config.json'), 'utf8'));
+    assert.equal(reference.root, before.root);
+    if (action === 'Configure') {
+      assert.ok(ui.asked.includes('keep:LLM_API_KEY'));
+      assert.equal(ui.questions.find(question => question.id === 'MEMORY_LLM_MODEL').initial, beforeEnv.MEMORY_LLM_MODEL);
+      const snapshot = JSON.parse(await readFile(join(directory, '.ams/before-save.json'), 'utf8'));
+      assert.deepEqual(JSON.parse(snapshot['.ams/native-config.json']), reference);
+      const expectedBackup = { root: before.root, defaults: before.defaults, overrides: before.overrides };
+      if (before.deletions !== undefined) expectedBackup.deletions = before.deletions;
+      assert.deepEqual(JSON.parse(snapshot['.ams/native-backup.json']), expectedBackup);
+    } else {
+      assert.deepEqual(ui.asked, []);
+      const snapshotRoot = join(directory, '.ams/previous-settings/.ams');
+      assert.deepEqual(JSON.parse(await readFile(join(snapshotRoot, 'native-config.json'), 'utf8')), reference);
+      const expectedBackup = { root: before.root, defaults: before.defaults, overrides: before.overrides };
+      if (before.deletions !== undefined) expectedBackup.deletions = before.deletions;
+      assert.deepEqual(JSON.parse(await readFile(join(snapshotRoot, 'native-backup.json'), 'utf8')), expectedBackup);
+    }
+  });
+}
 test('setup preserves saved data paths and shortens home paths in review', async t => {
   const directory = await fixture(t);
   await writeFile(join(directory, '.env'), encodeEnv({ ...settings, DATA_DIR: join(homedir(), 'ams', 'data') }));
@@ -114,12 +170,11 @@ test('CLIProxyAPI account provider defaults to Codex, offers Claude and preserve
   assert.equal(settings.CLIPROXY_AUTH_PROVIDER, 'codex');
   assert.equal(resolveSettings({ ...settings, CLIPROXY_AUTH_PROVIDER: 'custom' }).CLIPROXY_AUTH_PROVIDER, 'custom');
 });
-test('local service keys are generated or reused without questions and invalid saved keys are not replaced', async () => {
+test('Configure generates only the CLIProxy key and preserves optional native Core credentials', async () => {
   const fresh = interaction();
   const generated = await serverQuestions(fresh, {});
-  assert.match(generated.CORE_API_KEY, /^sk-ams-core-[a-f0-9]{64}$/);
+  assert.equal(generated.CORE_API_KEY, undefined);
   assert.match(generated.CLIPROXY_API_KEY, /^sk-ams-cliproxy-[a-f0-9]{64}$/);
-  assert.notEqual(generated.CORE_API_KEY, generated.CLIPROXY_API_KEY);
   assert.ok(!fresh.asked.some(id => /CORE_API_KEY|CLIPROXY_API_KEY/.test(id)));
   const saved = interaction();
   const repeated = await serverQuestions(saved, generated);
@@ -276,6 +331,19 @@ test('provider endpoint questions show the example only as a placeholder and pre
   const saved = interaction();
   await serverQuestions(saved, settings);
   assert.equal(saved.questions.find(item => item.id === 'LLM_BASE_URL').initial, settings.LLM_BASE_URL);
+});
+
+test('changing the provider endpoint requires a new API key without offering the saved key', async () => {
+  const replacementURL = 'https://replacement.provider.test.invalid/v1';
+  const ui = interaction({ LLM_BASE_URL: replacementURL, LLM_API_KEY: 'replacement-key' });
+  const env = await serverQuestions(ui, settings);
+  assert.equal(env.LLM_BASE_URL, replacementURL);
+  assert.equal(env.LLM_API_KEY, 'replacement-key');
+  assert.ok(ui.asked.includes('LLM_API_KEY'));
+  assert.ok(!ui.asked.includes('keep:LLM_API_KEY'));
+  const question = ui.questions.find(item => item.id === 'LLM_API_KEY');
+  assert.equal(question.secret, true);
+  assert.equal(question.initial, undefined);
 });
 
 test('Core and Knowledge select from one discovery after the provider URL and key are entered', async () => {
